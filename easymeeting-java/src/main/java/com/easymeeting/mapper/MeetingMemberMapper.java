@@ -10,7 +10,7 @@ public interface MeetingMemberMapper {
 
     int insert(MeetingMember meetingMember);
 
-    int updateByUserId(MeetingMember meetingMember);
+    int updateByMeetingIdAndUserId(MeetingMember meetingMember);
 
     MeetingMember selectByUserId(@Param("userId") String userId);
 

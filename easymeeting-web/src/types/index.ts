@@ -121,6 +121,39 @@ export interface MeetingJoinContent {
   meetingMemberList: MeetingMemberDto[]
 }
 
+// 退出会议消息内容
+export interface MeetingExitContent {
+  exitUserId: string
+  exitStatus: number  // 0=正常退出, 1=踢出, 2=拉黑
+  meetingMemberList: MeetingMemberDto[]
+}
+
+// 强制退出消息内容（被踢出/拉黑）
+export interface ForceExitContent {
+  exitUserId: string
+  exitStatus: number  // 1=踢出, 2=拉黑
+  meetingMemberList: MeetingMemberDto[]
+}
+
+// 会议成员状态枚举
+export enum MeetingMemberStatus {
+  NORMAL = 0,      // 正常
+  KICK_OUT = 1,    // 被踢出
+  BLACKLIST = 2    // 被拉黑
+}
+
+// 会议成员类型枚举
+export enum MemberType {
+  CREATOR = 0,     // 创建者/主持人
+  NORMAL = 1       // 普通成员
+}
+
+// 会议状态枚举
+export enum MeetingStatus {
+  RUNNING = 0,     // 进行中
+  FINISHED = 1     // 已结束
+}
+
 // WebSocket 消息结构
 export interface WebSocketMessage<T = any> {
   messageSendToType: number

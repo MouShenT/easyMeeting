@@ -3,6 +3,7 @@ package com.easymeeting.redis;
 import com.easymeeting.dto.MeetingMemberDto;
 import com.easymeeting.dto.TokenUserInfoDto;
 import com.easymeeting.entity.constants.Constants;
+import com.easymeeting.enums.MeetingMemberStatusEnum;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -148,5 +149,14 @@ public class RedisComponent {
      */
     public void removeMeetingMembers(String meetingId) {
         redisUtils.delete(Constants.REDIS_KEY_MEETING_ROOM + meetingId);
+    }
+    public Boolean exitMeeting(String meetingId, String userId, MeetingMemberStatusEnum meetingMemberStatusEnum) {
+        MeetingMemberDto meetingMemberDto = getMeetingMember(meetingId, userId);
+        if (meetingMemberDto == null) {
+            return false;
+        }
+        // 从会议成员列表中移除该用户
+        removeMeetingMember(meetingId, userId);
+        return true;
     }
 }

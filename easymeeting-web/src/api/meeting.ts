@@ -36,3 +36,28 @@ export function preJoinMeeting(params: PreJoinMeetingParams): Promise<string> {
 export function joinMeeting(params: JoinMeetingParams): Promise<void> {
   return request.post('/meeting/joinMeeting', params)
 }
+
+// 获取当前进行中的会议
+export function getCurrentMeeting(): Promise<MeetingInfo | null> {
+  return request.get('/meeting/getCurrentMeeting')
+}
+
+// 退出会议
+export function exitMeeting(): Promise<void> {
+  return request.get('/meeting/exitMeeting')
+}
+
+// 踢出成员（仅创建者可用）
+export function kickOutMember(userId: string): Promise<void> {
+  return request.get('/meeting/kickOutMeeting', { params: { userId } })
+}
+
+// 拉黑成员（仅创建者可用）
+export function blacklistMember(userId: string): Promise<void> {
+  return request.get('/meeting/blackMeeting', { params: { userId } })
+}
+
+// 结束会议（仅创建者可用）
+export function finishMeeting(): Promise<void> {
+  return request.get('/meeting/finishMeeting')
+}

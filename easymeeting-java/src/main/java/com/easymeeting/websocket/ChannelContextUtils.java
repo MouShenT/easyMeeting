@@ -297,6 +297,36 @@ public class ChannelContextUtils {
     }
 
     /**
+     * 发送退出会议消息并清理 Channel
+     * 先发送消息（确保用户还在房间内能收到），再从房间移除 Channel
+     * 
+     * @param messageSendDto 退出消息
+     * @param userId 退出的用户ID
+     */
+    public void sendExitMessageAndCleanup(MessageSendDto<?> messageSendDto, String userId) {
+        String meetingId = messageSendDto.getMeetingId();
+        if (StringUtils.isEmpty(meetingId) || StringUtils.isEmpty(userId)) {
+            log.warn("发送退出消息失败：meetingId 或 userId 为空");
+            return;
+        }
+        
+        // 1. 先发送消息（此时用户还在房间内）
+        sendMessage(messageSendDto);
+        
+        // 2. 再从 WebSocket 房间移除 Channel
+        Channel channel = USER_CONTEXT_MAP.get(userId);
+        if (channel != null) {
+            leaveMeetingRoom(meetingId, channel);
+            // 更新 Channel 上的用户信息
+            TokenUserInfoDto channelUserInfo = channel.attr(TOKEN_USER_INFO_KEY).get();
+            if (channelUserInfo != null) {
+                channelUserInfo.setCurrentMeetingId(null);
+            }
+            log.info("用户 {} 已从会议房间 {} 移除", userId, meetingId);
+        }
+    }
+
+    /**
      * 关闭用户连接（主动踢人时使用）
      * 注意：这里不更新 lastOffTime，单设备登录通过 Redis token 机制实现
      */

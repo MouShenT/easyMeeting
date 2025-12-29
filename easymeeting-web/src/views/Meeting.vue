@@ -2,9 +2,15 @@
   <div class="meeting-container">
     <!-- 顶部工具栏 -->
     <div class="meeting-header">
-      <div class="meeting-info">
-        <span class="meeting-name">{{ meetingName }}</span>
-        <span class="meeting-id">会议号: {{ meetingId }}</span>
+      <div class="header-left">
+        <el-button type="text" class="back-btn" @click="handleBack">
+          <el-icon><ArrowLeft /></el-icon>
+          返回
+        </el-button>
+        <div class="meeting-info">
+          <span class="meeting-name">{{ meetingName }}</span>
+          <span class="meeting-id">会议号: {{ meetingNo }}</span>
+        </div>
       </div>
       <div class="meeting-time">
         <el-icon><Clock /></el-icon>
@@ -14,7 +20,6 @@
 
     <!-- 视频区域 -->
     <div class="video-area">
-      <!-- 本地视频 -->
       <div class="video-grid" :class="gridClass">
         <div 
           v-for="member in members" 
@@ -23,7 +28,7 @@
           :class="{ 'is-self': member.userId === userStore.userId }"
         >
           <video 
-            v-if="member.videoOpen && videoStreams[member.userId]"
+            v-if="member.videoOpen && hasVideoStream(member.userId)"
             :ref="el => setVideoRef(member.userId, el)"
             autoplay
             playsinline
@@ -64,6 +69,10 @@
         <el-icon :size="24"><ChatDotRound /></el-icon>
         <span>聊天</span>
       </div>
+      <div v-if="isCreator" class="control-item end-meeting" @click="handleEndMeeting">
+        <el-icon :size="24"><CircleClose /></el-icon>
+        <span>结束会议</span>
+      </div>
       <div class="control-item leave" @click="handleLeaveMeeting">
         <el-icon :size="24"><SwitchButton /></el-icon>
         <span>离开会议</span>
@@ -71,49 +80,27 @@
     </div>
 
     <!-- 成员列表侧边栏 -->
-    <el-drawer v-model="showMembers" title="会议成员" direction="rtl" size="300px">
-      <div class="member-list">
-        <div v-for="member in members" :key="member.userId" class="member-item">
-          <div class="member-avatar">{{ member.nickName.charAt(0) }}</div>
-          <div class="member-detail">
-            <span class="name">{{ member.nickName }}</span>
-            <span v-if="member.memberType === 0" class="host-tag">主持人</span>
-          </div>
-          <div class="member-status">
-            <el-icon v-if="member.videoOpen" class="status-on"><VideoCamera /></el-icon>
-            <el-icon v-else class="status-off"><VideoCameraFilled /></el-icon>
-          </div>
-        </div>
-      </div>
+    <el-drawer v-model="showMembers" title="会议成员" direction="rtl" size="320px">
+      <MemberList 
+        :members="members"
+        :current-user-id="userStore.userId"
+        :creator-id="creatorId"
+        @kick="handleKickMember"
+        @blacklist="handleBlacklistMember"
+      />
     </el-drawer>
 
     <!-- 聊天侧边栏 -->
-    <el-drawer v-model="showChat" title="会议聊天" direction="rtl" size="350px">
-      <div class="chat-container">
-        <div class="chat-messages" ref="chatMessagesRef">
-          <div 
-            v-for="(msg, index) in chatMessages" 
-            :key="index" 
-            class="chat-message"
-            :class="{ 'is-self': msg.sendUserId === userStore.userId }"
-          >
-            <div class="msg-sender">{{ msg.sendUserNickName }}</div>
-            <div class="msg-content">{{ msg.content }}</div>
-            <div class="msg-time">{{ formatTime(msg.sendTime) }}</div>
-          </div>
-        </div>
-        <div class="chat-input">
-          <el-input 
-            v-model="chatInput" 
-            placeholder="输入消息..." 
-            @keyup.enter="sendChatMessage"
-          />
-          <el-button type="primary" @click="sendChatMessage">发送</el-button>
-        </div>
-      </div>
+    <el-drawer v-model="showChat" title="会议聊天" direction="rtl" size="380px">
+      <ChatPanel 
+        :messages="chatMessages"
+        :current-user-id="userStore.userId"
+        @send="sendChatMessage"
+      />
     </el-drawer>
   </div>
 </template>
+
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
@@ -121,11 +108,16 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   Clock, VideoCamera, VideoCameraFilled, Microphone, Mute,
-  User, ChatDotRound, SwitchButton 
+  User, ChatDotRound, SwitchButton, ArrowLeft, CircleClose 
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
-import { wsService, MessageType, MessageSendToType } from '@/utils/websocket'
-import type { WebSocketMessage, MeetingMember, MeetingJoinContent } from '@/utils/websocket'
+import { wsService, MessageType, MessageSendToType, MemberType, MemberStatus } from '@/utils/websocket'
+import type { WebSocketMessage, MeetingMember, MeetingJoinContent, MeetingExitContent } from '@/utils/websocket'
+import { webRTCManager } from '@/utils/webrtc'
+import { kickOutMember, blacklistMember, finishMeeting, getCurrentMeeting, exitMeeting } from '@/api/meeting'
+import MemberList from '@/components/MemberList.vue'
+import ChatPanel from '@/components/ChatPanel.vue'
+import type { ChatMessage } from '@/components/ChatPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -133,7 +125,9 @@ const userStore = useUserStore()
 
 // 会议信息
 const meetingId = ref(route.params.meetingId as string || '')
+const meetingNo = ref('')
 const meetingName = ref('视频会议')
+const creatorId = ref('')
 const duration = ref(0)
 let durationTimer: number | null = null
 
@@ -141,28 +135,27 @@ let durationTimer: number | null = null
 const members = ref<MeetingMember[]>([])
 
 // 视频流
-const videoStreams = reactive<Record<string, MediaStream>>({})
+const videoStreams = ref<Record<string, MediaStream>>({})
 const videoRefs = reactive<Record<string, HTMLVideoElement | null>>({})
+
+// 检查用户是否有视频流（使用 computed 确保响应式）
+function hasVideoStream(userId: string): boolean {
+  return !!videoStreams.value[userId]
+}
 
 // 本地媒体状态
 const localVideoOpen = ref(true)
 const localAudioOpen = ref(true)
-let localStream: MediaStream | null = null
 
 // UI 状态
 const showMembers = ref(false)
 const showChat = ref(false)
 
-// 聊天
-interface ChatMessage {
-  sendUserId: string
-  sendUserNickName: string
-  content: string
-  sendTime: number
-}
+// 聊天消息
 const chatMessages = ref<ChatMessage[]>([])
-const chatInput = ref('')
-const chatMessagesRef = ref<HTMLElement | null>(null)
+
+// 是否是创建者
+const isCreator = computed(() => userStore.userId === creatorId.value)
 
 // 计算视频网格样式
 const gridClass = computed(() => {
@@ -178,9 +171,17 @@ const gridClass = computed(() => {
 function setVideoRef(userId: string, el: any) {
   if (el) {
     videoRefs[userId] = el as HTMLVideoElement
-    // 如果已有流，设置到视频元素
-    if (videoStreams[userId]) {
-      (el as HTMLVideoElement).srcObject = videoStreams[userId]
+    // 确保流被正确绑定
+    const stream = videoStreams.value[userId]
+    if (stream) {
+      (el as HTMLVideoElement).srcObject = stream
+    } else if (userId === userStore.userId) {
+      // 如果是自己但流还没准备好，尝试从 webRTCManager 获取
+      const localStream = webRTCManager.getLocalStream()
+      if (localStream) {
+        videoStreams.value[userId] = localStream
+        ;(el as HTMLVideoElement).srcObject = localStream
+      }
     }
   }
 }
@@ -196,29 +197,42 @@ function formatDuration(seconds: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 }
 
-// 格式化时间
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+// 返回主页
+function handleBack() {
+  router.push('/')
 }
 
 // 初始化本地媒体
 async function initLocalMedia() {
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: localVideoOpen.value,
-      audio: localAudioOpen.value
-    })
-    videoStreams[userStore.userId] = localStream
-    
-    // 设置到视频元素
-    await nextTick()
-    if (videoRefs[userStore.userId]) {
-      videoRefs[userStore.userId]!.srcObject = localStream
+    const stream = await webRTCManager.initLocalMedia(localVideoOpen.value, localAudioOpen.value)
+    if (stream) {
+      videoStreams.value[userStore.userId] = stream
+      await nextTick()
+      if (videoRefs[userStore.userId]) {
+        videoRefs[userStore.userId]!.srcObject = stream
+      }
+    } else {
+      ElMessage.warning('无法获取摄像头/麦克风权限，请检查浏览器设置')
+      localVideoOpen.value = false
+      localAudioOpen.value = false
     }
-  } catch (error) {
-    console.error('Failed to get local media:', error)
-    ElMessage.warning('无法获取摄像头/麦克风权限')
+  } catch (error: any) {
+    console.error('初始化媒体失败:', error)
+    
+    // 根据错误给出具体提示
+    if (!window.isSecureContext) {
+      ElMessage.error('请使用 HTTPS 或 localhost 访问，否则无法使用摄像头')
+    } else if (error.name === 'NotAllowedError') {
+      ElMessage.warning('您拒绝了摄像头/麦克风权限，请在浏览器设置中允许')
+    } else if (error.name === 'NotFoundError') {
+      ElMessage.warning('未检测到摄像头或麦克风设备')
+    } else if (error.name === 'NotReadableError') {
+      ElMessage.warning('摄像头或麦克风被其他程序占用')
+    } else {
+      ElMessage.warning('无法获取摄像头/麦克风权限')
+    }
+    
     localVideoOpen.value = false
     localAudioOpen.value = false
   }
@@ -227,17 +241,13 @@ async function initLocalMedia() {
 // 切换视频
 function toggleVideo() {
   localVideoOpen.value = !localVideoOpen.value
-  if (localStream) {
-    localStream.getVideoTracks().forEach(track => {
-      track.enabled = localVideoOpen.value
-    })
-  }
-  // 更新自己在成员列表中的状态
+  webRTCManager.toggleVideo(localVideoOpen.value)
+  
   const self = members.value.find(m => m.userId === userStore.userId)
   if (self) {
     self.videoOpen = localVideoOpen.value
   }
-  // 通知其他成员
+  
   wsService.send({
     messageSendToType: MessageSendToType.GROUP,
     meetingId: meetingId.value,
@@ -250,110 +260,213 @@ function toggleVideo() {
 // 切换音频
 function toggleAudio() {
   localAudioOpen.value = !localAudioOpen.value
-  if (localStream) {
-    localStream.getAudioTracks().forEach(track => {
-      track.enabled = localAudioOpen.value
-    })
-  }
+  webRTCManager.toggleAudio(localAudioOpen.value)
 }
 
 // 发送聊天消息
-function sendChatMessage() {
-  if (!chatInput.value.trim()) return
-  
+function sendChatMessage(content: string) {
   wsService.send({
     messageSendToType: MessageSendToType.GROUP,
     meetingId: meetingId.value,
     messageType: MessageType.CHAT_TEXT_MESSAGE,
     sendUserId: userStore.userId,
     sendUserNickName: userStore.nickName,
-    messageContent: chatInput.value.trim(),
+    messageContent: content,
     sendTime: Date.now()
   })
   
-  // 本地添加消息
   chatMessages.value.push({
     sendUserId: userStore.userId,
     sendUserNickName: userStore.nickName,
-    content: chatInput.value.trim(),
+    content: content,
     sendTime: Date.now()
   })
-  
-  chatInput.value = ''
-  scrollChatToBottom()
 }
 
-function scrollChatToBottom() {
-  nextTick(() => {
-    if (chatMessagesRef.value) {
-      chatMessagesRef.value.scrollTop = chatMessagesRef.value.scrollHeight
+// 踢出成员
+async function handleKickMember(userId: string) {
+  try {
+    await ElMessageBox.confirm('确定要踢出该成员吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await kickOutMember(userId)
+    ElMessage.success('已踢出该成员')
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('踢出成员失败:', error)
     }
-  })
+  }
+}
+
+// 拉黑成员
+async function handleBlacklistMember(userId: string) {
+  try {
+    await ElMessageBox.confirm('确定要拉黑该成员吗？拉黑后该成员将无法重新加入会议。', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await blacklistMember(userId)
+    ElMessage.success('已拉黑该成员')
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('拉黑成员失败:', error)
+    }
+  }
+}
+
+// 结束会议
+async function handleEndMeeting() {
+  try {
+    await ElMessageBox.confirm('确定要结束会议吗？所有成员都将被移出会议。', '结束会议', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await finishMeeting()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('结束会议失败:', error)
+    }
+  }
 }
 
 // 离开会议
 async function handleLeaveMeeting() {
   try {
-    await ElMessageBox.confirm('确定要离开会议吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
+    // 检查是否是最后一个人
+    const isLastMember = members.value.length <= 1
+    // 检查是否是创建者
+    const isHost = userStore.userId === creatorId.value
     
-    // 发送离开消息
-    wsService.send({
-      messageSendToType: MessageSendToType.GROUP,
-      meetingId: meetingId.value,
-      messageType: MessageType.EXIT_MEETING_ROOM,
-      sendUserId: userStore.userId,
-      sendUserNickName: userStore.nickName
-    })
+    let confirmMessage = '确定要离开会议吗？'
+    let confirmTitle = '离开会议'
     
-    // 停止本地媒体
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop())
+    if (isLastMember) {
+      confirmMessage = '您是会议中的最后一个成员，离开后会议将自动结束。确定要离开吗？'
+      confirmTitle = '离开并结束会议'
+    } else if (isHost) {
+      confirmMessage = '您是会议主持人，离开后会议仍将继续。如需结束会议请点击"结束会议"按钮。确定要离开吗？'
     }
     
-    // 断开 WebSocket
-    wsService.disconnect()
+    await ElMessageBox.confirm(confirmMessage, confirmTitle, {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: isLastMember ? 'warning' : 'info'
+    })
     
-    // 返回首页
+    // 调用后端退出接口
+    await exitMeeting()
+    
+    cleanup()
     router.push('/')
-  } catch {
-    // 用户取消
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('离开会议失败:', error)
+    }
   }
 }
+
+// 清理资源
+function cleanup() {
+  webRTCManager.cleanup()
+  wsService.disconnect()
+  if (durationTimer) {
+    clearInterval(durationTimer)
+    durationTimer = null
+  }
+}
+
 
 // WebSocket 消息处理
 function handleMemberJoin(message: WebSocketMessage<MeetingJoinContent>) {
   const content = message.messageContent
-  console.log('handleMemberJoin received:', content)
   if (content) {
-    // 更新成员列表（从服务器获取的完整列表）
+    const previousMemberIds = new Set(members.value.map(m => m.userId))
+    
     if (content.meetingMemberList && content.meetingMemberList.length > 0) {
-      // 保留本地视频状态
       const localVideoState = localVideoOpen.value
+      const localStream = webRTCManager.getLocalStream()
+      
+      // 保存现有的远程视频流
+      const existingStreams = { ...videoStreams.value }
+      
       members.value = content.meetingMemberList.map(member => ({
         ...member,
-        // 如果是自己，保留本地视频状态
         videoOpen: member.userId === userStore.userId ? localVideoState : member.videoOpen
       }))
-      console.log('Updated members list:', members.value)
+      
+      // 恢复所有视频流
+      Object.keys(existingStreams).forEach(userId => {
+        if (existingStreams[userId]) {
+          videoStreams.value[userId] = existingStreams[userId]
+        }
+      })
+      
+      // 确保自己的视频流被保留
+      if (localStream) {
+        videoStreams.value[userStore.userId] = localStream
+        nextTick(() => {
+          if (videoRefs[userStore.userId]) {
+            videoRefs[userStore.userId]!.srcObject = localStream
+          }
+        })
+      }
+      
+      // 找到创建者
+      const creator = members.value.find(m => m.memberType === MemberType.CREATOR)
+      if (creator) {
+        creatorId.value = creator.userId
+      }
+      
+      // 与新成员建立 WebRTC 连接
+      members.value.forEach(member => {
+        if (member.userId !== userStore.userId && !previousMemberIds.has(member.userId)) {
+          // 新成员加入，发起连接
+          console.log('New member joined, initiating connection to:', member.userId)
+          webRTCManager.initiateConnection(member.userId)
+        } else if (member.userId !== userStore.userId && !webRTCManager.hasConnection(member.userId)) {
+          // 已有成员但没有连接，根据 userId 大小决定谁发起
+          if (userStore.userId > member.userId) {
+            console.log('No connection exists, initiating connection to:', member.userId)
+            webRTCManager.initiateConnection(member.userId)
+          }
+        }
+      })
     }
     
-    // 如果是新成员加入，显示提示
     if (content.newMember && content.newMember.userId !== userStore.userId) {
       ElMessage.info(`${content.newMember.nickName} 加入了会议`)
     }
   }
 }
 
-function handleMemberExit(message: WebSocketMessage) {
-  const userId = message.sendUserId
-  if (userId) {
-    members.value = members.value.filter(m => m.userId !== userId)
-    delete videoStreams[userId]
-    ElMessage.info(`${message.sendUserNickName || '成员'} 离开了会议`)
+function handleMemberExit(message: WebSocketMessage<MeetingExitContent>) {
+  const content = message.messageContent
+  const exitUserId = content?.exitUserId || message.sendUserId
+  
+  if (exitUserId) {
+    // 检查是否是自己被踢出或拉黑
+    if (exitUserId === userStore.userId) {
+      const exitStatus = content?.exitStatus
+      if (exitStatus === MemberStatus.KICK_OUT) {
+        ElMessage.warning('您已被移出会议')
+      } else if (exitStatus === MemberStatus.BLACKLIST) {
+        ElMessage.error('您已被拉黑，无法重新加入此会议')
+      }
+      cleanup()
+      router.push('/')
+      return
+    }
+    
+    members.value = members.value.filter(m => m.userId !== exitUserId)
+    webRTCManager.closeConnection(exitUserId)
+    delete videoStreams.value[exitUserId]
+    
+    const nickName = message.sendUserNickName || '成员'
+    ElMessage.info(`${nickName} 离开了会议`)
   }
 }
 
@@ -376,28 +489,70 @@ function handleChatMessage(message: WebSocketMessage) {
       content: message.messageContent as string,
       sendTime: message.sendTime || Date.now()
     })
-    scrollChatToBottom()
   }
 }
 
 function handleMeetingEnd(_message: WebSocketMessage) {
   ElMessage.warning('会议已结束')
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop())
-  }
-  wsService.disconnect()
+  cleanup()
   router.push('/')
+}
+
+// 远程流回调
+function onRemoteStream(userId: string, stream: MediaStream) {
+  console.log('Received remote stream for user:', userId, 'tracks:', stream.getTracks().length)
+  videoStreams.value[userId] = stream
+  
+  // 强制更新成员的 videoOpen 状态
+  const member = members.value.find(m => m.userId === userId)
+  if (member) {
+    member.videoOpen = true
+  }
+  
+  nextTick(() => {
+    if (videoRefs[userId]) {
+      videoRefs[userId]!.srcObject = stream
+      console.log('Set srcObject for user:', userId)
+    } else {
+      console.log('Video ref not found for user:', userId, 'will retry...')
+      // 如果 ref 还没准备好，稍后重试
+      setTimeout(() => {
+        if (videoRefs[userId]) {
+          videoRefs[userId]!.srcObject = stream
+          console.log('Retry: Set srcObject for user:', userId)
+        }
+      }, 500)
+    }
+  })
+}
+
+function onStreamRemoved(userId: string) {
+  delete videoStreams.value[userId]
 }
 
 // 初始化
 onMounted(async () => {
-  // 获取会议ID
   meetingId.value = route.params.meetingId as string
   if (!meetingId.value) {
     ElMessage.error('会议ID无效')
     router.push('/')
     return
   }
+
+  // 获取会议信息
+  try {
+    const meeting = await getCurrentMeeting()
+    if (meeting) {
+      meetingName.value = meeting.meetingName
+      meetingNo.value = meeting.meetingNo
+      creatorId.value = meeting.createUserId
+    }
+  } catch (error) {
+    console.error('获取会议信息失败:', error)
+  }
+
+  // 初始化 WebRTC 管理器
+  webRTCManager.init(meetingId.value, userStore.userId, onRemoteStream, onStreamRemoved)
 
   // 注册 WebSocket 消息处理器
   wsService.on(MessageType.ADD_MEETING_ROOM, handleMemberJoin)
@@ -409,21 +564,20 @@ onMounted(async () => {
   // 初始化本地媒体
   await initLocalMedia()
 
-  // 先添加自己到成员列表（临时显示，等待服务器返回完整列表）
+  // 先添加自己到成员列表
   members.value = [{
     userId: userStore.userId,
     nickName: userStore.nickName,
     joinTime: Date.now(),
-    memberType: 1,
+    memberType: MemberType.NORMAL,
     status: 0,
     videoOpen: localVideoOpen.value,
     sex: userStore.sex
   }]
 
-  // 连接 WebSocket（连接成功后服务器会发送成员列表）
+  // 连接 WebSocket
   try {
     await wsService.connect()
-    console.log('WebSocket connected for meeting:', meetingId.value)
     ElMessage.success('已连接到会议服务器')
   } catch (error) {
     console.error('Failed to connect WebSocket:', error)
@@ -437,15 +591,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  // 清理
   if (durationTimer) {
     clearInterval(durationTimer)
   }
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop())
-  }
+  webRTCManager.cleanup()
   
-  // 移除消息处理器
   wsService.off(MessageType.ADD_MEETING_ROOM, handleMemberJoin)
   wsService.off(MessageType.EXIT_MEETING_ROOM, handleMemberExit)
   wsService.off(MessageType.MEETING_USER_VIDEO_CHANGE, handleVideoChange)
@@ -454,12 +604,13 @@ onUnmounted(() => {
 })
 </script>
 
+
 <style scoped>
 .meeting-container {
-  height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #1a1a2e;
+  height: 100vh;
+  background-color: #1a1a1a;
   color: #fff;
 }
 
@@ -467,14 +618,30 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 24px;
-  background: rgba(0, 0, 0, 0.3);
+  padding: 12px 20px;
+  background-color: #2d2d2d;
+  border-bottom: 1px solid #3d3d3d;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.back-btn {
+  color: #fff;
+  font-size: 14px;
+}
+
+.back-btn:hover {
+  color: #409eff;
 }
 
 .meeting-info {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .meeting-name {
@@ -484,15 +651,15 @@ onUnmounted(() => {
 
 .meeting-id {
   font-size: 12px;
-  color: #aaa;
+  color: #999;
 }
 
 .meeting-time {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 14px;
-  color: #aaa;
+  color: #ccc;
 }
 
 .video-area {
@@ -502,9 +669,9 @@ onUnmounted(() => {
 }
 
 .video-grid {
-  height: 100%;
   display: grid;
   gap: 8px;
+  height: 100%;
 }
 
 .video-grid.grid-1 {
@@ -532,7 +699,7 @@ onUnmounted(() => {
 
 .video-item {
   position: relative;
-  background: #2d2d44;
+  background-color: #2d2d2d;
   border-radius: 8px;
   overflow: hidden;
 }
@@ -548,52 +715,52 @@ onUnmounted(() => {
 }
 
 .video-placeholder {
-  width: 100%;
-  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
+  height: 100%;
+  background-color: #3d3d3d;
 }
 
 .video-placeholder .avatar {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-color: #409eff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 32px;
   font-weight: 500;
+  color: #fff;
 }
 
 .member-info {
   position: absolute;
   bottom: 8px;
   left: 8px;
-  right: 8px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 4px 8px;
-  background: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.6);
   border-radius: 4px;
-}
-
-.member-name {
   font-size: 12px;
 }
 
-.video-off {
+.member-info .video-off {
   color: #f56c6c;
 }
 
 .meeting-controls {
   display: flex;
   justify-content: center;
+  align-items: center;
   gap: 32px;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.3);
+  padding: 16px 20px;
+  background-color: #2d2d2d;
+  border-top: 1px solid #3d3d3d;
 }
 
 .control-item {
@@ -604,148 +771,35 @@ onUnmounted(() => {
   cursor: pointer;
   padding: 8px 16px;
   border-radius: 8px;
-  transition: background 0.2s;
+  transition: background-color 0.2s;
 }
 
 .control-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background-color: #3d3d3d;
 }
 
 .control-item span {
   font-size: 12px;
-  color: #aaa;
+  color: #ccc;
 }
 
-.control-item .el-icon {
-  color: #fff;
-}
-
-.control-item .el-icon.is-off {
+.control-item .is-off {
   color: #f56c6c;
 }
 
-.control-item.leave .el-icon {
+.control-item.end-meeting {
   color: #f56c6c;
 }
 
-.control-item.leave span {
-  color: #f56c6c;
+.control-item.end-meeting:hover {
+  background-color: rgba(245, 108, 108, 0.2);
 }
 
-/* 成员列表 */
-.member-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.control-item.leave {
+  color: #e6a23c;
 }
 
-.member-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px;
-  border-radius: 8px;
-  background: #f5f7fa;
-}
-
-.member-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-}
-
-.member-detail {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.member-detail .name {
-  font-size: 14px;
-  color: #333;
-}
-
-.host-tag {
-  font-size: 10px;
-  padding: 2px 6px;
-  background: #409eff;
-  color: #fff;
-  border-radius: 4px;
-}
-
-.member-status .status-on {
-  color: #67c23a;
-}
-
-.member-status .status-off {
-  color: #909399;
-}
-
-/* 聊天 */
-.chat-container {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.chat-message {
-  max-width: 80%;
-}
-
-.chat-message.is-self {
-  align-self: flex-end;
-}
-
-.chat-message.is-self .msg-content {
-  background: #409eff;
-  color: #fff;
-}
-
-.msg-sender {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 4px;
-}
-
-.msg-content {
-  padding: 8px 12px;
-  background: #f5f7fa;
-  border-radius: 8px;
-  font-size: 14px;
-  word-break: break-word;
-}
-
-.msg-time {
-  font-size: 10px;
-  color: #c0c4cc;
-  margin-top: 4px;
-  text-align: right;
-}
-
-.chat-input {
-  display: flex;
-  gap: 8px;
-  padding: 12px;
-  border-top: 1px solid #ebeef5;
-}
-
-.chat-input .el-input {
-  flex: 1;
+.control-item.leave:hover {
+  background-color: rgba(230, 162, 60, 0.2);
 }
 </style>

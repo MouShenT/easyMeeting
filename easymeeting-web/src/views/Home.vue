@@ -2,6 +2,13 @@
   <div class="home-container">
     <NavBar />
     <div class="home-content">
+      <!-- 当前进行中的会议 -->
+      <CurrentMeetingCard 
+        v-if="currentMeeting" 
+        :meeting="currentMeeting" 
+        @rejoin="handleRejoinMeeting" 
+      />
+      
       <div class="user-card">
         <div class="avatar">{{ userStore.nickName.charAt(0) }}</div>
         <div class="user-detail">
@@ -71,17 +78,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { VideoCamera, Plus, Clock } from '@element-plus/icons-vue'
 import NavBar from '@/components/NavBar.vue'
+import CurrentMeetingCard from '@/components/CurrentMeetingCard.vue'
 import { useUserStore } from '@/stores/user'
-import { quickMeeting, joinMeeting, preJoinMeeting } from '@/api/meeting'
-import type { QuickMeetingForm, JoinMeetingForm } from '@/types'
+import { quickMeeting, joinMeeting, preJoinMeeting, getCurrentMeeting } from '@/api/meeting'
+import type { QuickMeetingForm, JoinMeetingForm, MeetingInfo } from '@/types'
 
 const router = useRouter()
 const userStore = useUserStore()
+
+// 当前进行中的会议
+const currentMeeting = ref<MeetingInfo | null>(null)
 
 const quickMeetingDialogVisible = ref(false)
 const quickMeetingLoading = ref(false)
@@ -101,6 +112,20 @@ const joinMeetingForm = reactive<JoinMeetingForm>({
   videoOpen: true
 })
 
+// 加载当前进行中的会议
+async function loadCurrentMeeting() {
+  try {
+    currentMeeting.value = await getCurrentMeeting()
+  } catch (error) {
+    console.error('获取当前会议失败:', error)
+  }
+}
+
+// 重新加入会议
+function handleRejoinMeeting(meetingId: string) {
+  router.push(`/meeting/${meetingId}`)
+}
+
 function resetQuickMeetingForm() {
   quickMeetingForm.meetingNoType = 0
   quickMeetingForm.meetingName = ''
@@ -116,6 +141,11 @@ function resetJoinMeetingForm() {
 }
 
 function handleStartMeeting() {
+  // 如果有正在进行的会议，提示用户
+  if (currentMeeting.value) {
+    ElMessage.warning('您有正在进行的会议，请先结束或退出当前会议')
+    return
+  }
   resetQuickMeetingForm()
   quickMeetingDialogVisible.value = true
 }
@@ -146,6 +176,11 @@ async function confirmQuickMeeting() {
 }
 
 function handleJoinMeeting() {
+  // 如果有正在进行的会议，直接跳转到该会议
+  if (currentMeeting.value) {
+    router.push(`/meeting/${currentMeeting.value.meetingId}`)
+    return
+  }
   resetJoinMeetingForm()
   joinDialogVisible.value = true
 }
@@ -183,6 +218,11 @@ async function confirmJoin() {
 function handleHistory() {
   router.push('/history')
 }
+
+// 页面加载时获取当前会议
+onMounted(() => {
+  loadCurrentMeeting()
+})
 </script>
 
 <style scoped>

@@ -21,7 +21,7 @@ public class MeetingMemberServiceImpl implements MeetingMemberService {
 
     @Override
     public MeetingMember updateMember(MeetingMember meetingMember) {
-        meetingMemberMapper.updateByUserId(meetingMember);
+        meetingMemberMapper.updateByMeetingIdAndUserId(meetingMember);
         return meetingMember;
     }
 

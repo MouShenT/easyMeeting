@@ -16,6 +16,8 @@ import org.springframework.stereotype.Component;
 /**
  * Redis 消息处理器（集群模式）
  * 使用 Redis Pub/Sub 实现跨服务器消息传递
+ * 视频会议信令对实时性要求高，Redis 延迟更低
+ * 信令消息丢失可以通过 WebRTC 的 ICE 重连机制恢复
  * 
  * 当配置 messaging.handle.channel=redis 时启用
  */

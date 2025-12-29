@@ -21,17 +21,16 @@
         VALUES (#{meetingId}, #{userId}, #{nickName}, #{lastJoinTime}, #{status}, #{memberType}, #{meetingStatus})
     </insert>
 
-    <update id="updateByUserId">
+    <update id="updateByMeetingIdAndUserId">
         UPDATE meeting_member
         <set>
-            <if test="meetingId != null">meeting_id = #{meetingId},</if>
             <if test="nickName != null">nick_name = #{nickName},</if>
             <if test="lastJoinTime != null">last_join_time = #{lastJoinTime},</if>
             <if test="status != null">status = #{status},</if>
             <if test="memberType != null">member_type = #{memberType},</if>
             <if test="meetingStatus != null">meeting_status = #{meetingStatus},</if>
         </set>
-        WHERE user_id = #{userId}
+        WHERE meeting_id = #{meetingId} AND user_id = #{userId}
     </update>
 
     <select id="selectByUserId" resultMap="BaseResultMap">

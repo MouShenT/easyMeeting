@@ -4,6 +4,8 @@ import com.easymeeting.dto.JoinMeetingDto;
 import com.easymeeting.dto.MeetingCreateDto;
 import com.easymeeting.dto.TokenUserInfoDto;
 import com.easymeeting.entity.MeetingInfo;
+import com.easymeeting.enums.MeetingMemberStatusEnum;
+import com.easymeeting.enums.MeetingStatusEnum;
 import com.easymeeting.exception.BusinessException;
 import com.easymeeting.interceptor.TokenInterceptor;
 import com.easymeeting.redis.RedisComponent;
@@ -134,10 +136,47 @@ public class MeetingController {
         if (StringUtils.isEmpty(joinMeetingDto.getMeetingId())) {
             joinMeetingDto.setMeetingId(tokenUserInfoDto.getCurrentMeetingId());
         }
-        
         meetingInfoService.joinMeeting(joinMeetingDto);
-
         return ResponseVO.success();
     }
+    @GetMapping("/exitMeeting")
+    public ResponseVO<Void> exitMeeting(HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+
+        meetingInfoService.exitMeetingRoom(tokenUserInfoDto, MeetingMemberStatusEnum.EXIT_MEETING);
+        return ResponseVO.success();
+    }
+    @GetMapping("/kickOutMeeting")
+    public ResponseVO<Void>  kickOutMeeting(@RequestParam String userId, HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        meetingInfoService.forceExitMeetingRoom(tokenUserInfoDto, userId, MeetingMemberStatusEnum.KICK_OUT);
+        return ResponseVO.success();
+    }
+    @GetMapping("/blackMeeting")
+    public ResponseVO<Void> blackMeeting(@RequestParam String userId, HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        meetingInfoService.forceExitMeetingRoom(tokenUserInfoDto, userId, MeetingMemberStatusEnum.BLACKLIST);
+        return ResponseVO.success();
+    }
+    @GetMapping("/finishMeeting")
+    public ResponseVO<Void> finishMeeting( HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        meetingInfoService.finishMeeting(tokenUserInfoDto.getCurrentMeetingId(),tokenUserInfoDto.getUserId());
+        return ResponseVO.success();
+    }
+    @GetMapping("/getCurrentMeeting")
+    public ResponseVO<MeetingInfo> getCurrentMeeting( HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        if(StringUtils.isEmpty(tokenUserInfoDto.getCurrentMeetingId())){
+            return ResponseVO.success(null);
+        }
+        MeetingInfo meetingInfo=meetingInfoService.getMeetingById(tokenUserInfoDto.getCurrentMeetingId());
+        if(MeetingStatusEnum.FINISHED.getStatus().equals(meetingInfo.getStatus())){
+            return ResponseVO.success(null);
+        }
+        return ResponseVO.success(meetingInfo);
+    }
+
+
 
 }

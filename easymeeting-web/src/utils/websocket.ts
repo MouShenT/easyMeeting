@@ -13,7 +13,11 @@ export enum MessageType {
   USER_CONTACT_APPLY = 8,      // 好友申请消息
   INVITE_MESSAGE_MEETING = 9,  // 邀请入会
   FORCE_OFF_LINE = 10,         // 强制下线
-  MEETING_USER_VIDEO_CHANGE = 11 // 用户视频改变
+  MEETING_USER_VIDEO_CHANGE = 11, // 用户视频改变
+  // WebRTC 信令类型
+  WEBRTC_OFFER = 12,           // WebRTC Offer
+  WEBRTC_ANSWER = 13,          // WebRTC Answer
+  WEBRTC_ICE_CANDIDATE = 14    // ICE Candidate
 }
 
 // 消息发送目标类型
@@ -54,6 +58,26 @@ export interface MeetingMember {
 export interface MeetingJoinContent {
   newMember: MeetingMember
   meetingMemberList: MeetingMember[]
+}
+
+// 退出会议消息内容
+export interface MeetingExitContent {
+  exitUserId: string
+  exitStatus: number  // 0=正常退出, 1=踢出, 2=拉黑
+  meetingMemberList: MeetingMember[]
+}
+
+// 成员状态枚举
+export enum MemberStatus {
+  NORMAL = 0,      // 正常
+  KICK_OUT = 1,    // 被踢出
+  BLACKLIST = 2    // 被拉黑
+}
+
+// 成员类型枚举（与后端 MemberTypeEnum 对应）
+export enum MemberType {
+  NORMAL = 0,      // 普通成员
+  CREATOR = 1      // 创建者/主持人
 }
 
 type MessageHandler = (message: WebSocketMessage) => void

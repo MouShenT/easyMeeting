@@ -2,6 +2,13 @@
   <div class="history-container">
     <NavBar />
     <div class="history-content">
+      <div class="page-header">
+        <el-button type="text" class="back-btn" @click="$router.push('/')">
+          <el-icon><ArrowLeft /></el-icon>
+          返回首页
+        </el-button>
+        <h3 class="page-title">会议记录</h3>
+      </div>
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
         <el-tab-pane label="全部" name="all" />
         <el-tab-pane label="我创建的" name="created" />
@@ -22,6 +29,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import NavBar from '@/components/NavBar.vue'
 import MeetingCard from '@/components/MeetingCard.vue'
 import { loadMeeting, loadMyCreatedMeeting, loadMyJoinedMeeting } from '@/api/meeting'
@@ -94,6 +102,25 @@ onMounted(() => {
   padding: 20px 40px;
   max-width: 800px;
   margin: 0 auto;
+}
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.back-btn {
+  color: #606266;
+  font-size: 14px;
+  padding: 0;
+}
+.back-btn:hover {
+  color: #409eff;
+}
+.page-title {
+  margin: 0;
+  font-size: 18px;
+  color: #303133;
 }
 .meeting-list {
   margin-top: 20px;

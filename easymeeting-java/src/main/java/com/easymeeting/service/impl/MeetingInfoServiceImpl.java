@@ -14,6 +14,7 @@ import com.easymeeting.vo.PageResult;
 import com.easymeeting.websocket.ChannelContextUtils;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -111,7 +112,7 @@ public class MeetingInfoServiceImpl implements MeetingInfoService {
         if(meetingMemberMapper.selectByMeetingIdAndUserId(meetingId, userId) == null) {
             meetingMemberMapper.insert(meetingMember);
         }else {
-            meetingMemberMapper.updateByUserId(meetingMember);
+            meetingMemberMapper.updateByMeetingIdAndUserId(meetingMember);
         }
     }
     private void addToMeeting(String meetingId, String userId,String nickName,Integer sex,Integer memberType,Boolean videoOpen) {
@@ -126,9 +127,16 @@ public class MeetingInfoServiceImpl implements MeetingInfoService {
         redisComponent.addToMeeting(meetingId,meetingMemberDto);
 
     }
-    private void checkMeetingJoin(String meetingId,String userId) {
-        MeetingMemberDto meetingMemberDto=redisComponent.getMeetingMember(meetingId,userId);
-        if(meetingMemberDto!=null&&MeetingMemberStatusEnum.BLACKLIST.getStatus().equals(meetingMemberDto.getMemberType())) {
+    private void checkMeetingJoin(String meetingId, String userId) {
+        // 1. 先检查 Redis 中的状态（如果用户还在会议中）
+        MeetingMemberDto meetingMemberDto = redisComponent.getMeetingMember(meetingId, userId);
+        if (meetingMemberDto != null && MeetingMemberStatusEnum.BLACKLIST.getStatus().equals(meetingMemberDto.getStatus())) {
+            throw new BusinessException("已经被拉黑");
+        }
+        
+        // 2. 检查数据库中的状态（用户被拉黑后会从 Redis 移除，但数据库有记录）
+        MeetingMember meetingMember = meetingMemberMapper.selectByMeetingIdAndUserId(meetingId, userId);
+        if (meetingMember != null && MeetingMemberStatusEnum.BLACKLIST.getStatus().equals(meetingMember.getStatus())) {
             throw new BusinessException("已经被拉黑");
         }
     }
@@ -184,5 +192,153 @@ public class MeetingInfoServiceImpl implements MeetingInfoService {
         redisComponent.updateTokenUserInfo(tokenUserInfoDto);
         return meetingInfo.getMeetingId();
     }
+
+    @Override
+    public void exitMeetingRoom(TokenUserInfoDto tokenUserInfoDto, MeetingMemberStatusEnum statusEnum) {
+        String meetingId = tokenUserInfoDto.getCurrentMeetingId();
+        if (StringUtils.isEmpty(meetingId)) {
+            return;
+        }
+        String userId = tokenUserInfoDto.getUserId();
+        
+        // 1. 从 Redis 会议成员列表中移除
+        Boolean exit = redisComponent.exitMeeting(meetingId, userId, statusEnum);
+        
+        // 2. 清除用户的当前会议ID（Redis 中的 token 信息）
+        tokenUserInfoDto.setCurrentMeetingId(null);
+        redisComponent.updateTokenUserInfo(tokenUserInfoDto);
+        
+        if (!exit) {
+            return;
+        }
+        
+        // 3. 如果被拉黑，更新数据库中的成员状态
+        if (MeetingMemberStatusEnum.BLACKLIST.equals(statusEnum)) {
+            MeetingMember meetingMember = meetingMemberMapper.selectByMeetingIdAndUserId(meetingId, userId);
+            if (meetingMember != null) {
+                meetingMember.setStatus(MeetingMemberStatusEnum.BLACKLIST.getStatus());
+                meetingMemberMapper.updateByMeetingIdAndUserId(meetingMember);
+            }
+        }
+        
+        // 4. 构建退出消息
+        List<MeetingMemberDto> meetingMemberDtoList = redisComponent.getMeetingMemberList(meetingId);
+        MeetingExitDto meetingExitDto = new MeetingExitDto();
+        meetingExitDto.setMeetingMemberList(meetingMemberDtoList);
+        meetingExitDto.setExitUserId(userId);
+        meetingExitDto.setExitStatus(statusEnum.getStatus());
+
+        MessageSendDto<MeetingExitDto> messageSendDto = new MessageSendDto<>();
+        messageSendDto.setMessageType(MessageTypeEnum.EXIT_MEETING_ROOM.getType());
+        messageSendDto.setMessageContent(meetingExitDto);
+        messageSendDto.setMeetingId(meetingId);
+        messageSendDto.setMessageSendToType(MessageSendToTypeEnum.GROUP.getType());
+        messageSendDto.setSendUserId(userId);
+        
+        // 5. 发送消息并清理 Channel（从会议房间移除）
+        channelContextUtils.sendExitMessageAndCleanup(messageSendDto, userId);
+        
+        // 6. 如果被拉黑或被踢出，可选择强制断开 WebSocket 连接
+        // 注意：这会导致用户需要重新建立 WebSocket 连接
+        // 如果不需要强制断开，可以注释掉这段代码
+        if (MeetingMemberStatusEnum.BLACKLIST.equals(statusEnum) || 
+            MeetingMemberStatusEnum.KICK_OUT.equals(statusEnum)) {
+            // 强制关闭用户的 WebSocket 连接，同时清理 USER_CONTEXT_MAP
+            channelContextUtils.closeContext(userId);
+        }
+        
+        // 7. 检查会议是否还有人，没人则自动结束会议
+        if (meetingMemberDtoList == null || meetingMemberDtoList.isEmpty()) {
+            // 自动结束会议时传入 null，跳过权限检查
+            finishMeeting(meetingId, null);
+        }
+    }
+
+    @Override
+    public void forceExitMeetingRoom(TokenUserInfoDto tokenUserInfoDto, String userId,MeetingMemberStatusEnum meetingMemberStatusEnum) {
+        //检验操作的是不是会议创建者，不是就不能踢人和拉黑
+        MeetingInfo meetingInfo=meetingInfoMapper.selectById(tokenUserInfoDto.getCurrentMeetingId());
+        if(!meetingInfo.getCreateUserId().equals(tokenUserInfoDto.getUserId())){
+            throw new BusinessException("你没有权限");
+        }
+        // 先通过 userId 获取 token，再获取 TokenUserInfoDto
+        String token = redisComponent.getTokenByUserId(userId);
+        if (token == null) {
+            throw new BusinessException("用户不在线");
+        }
+        TokenUserInfoDto userInfoDto = redisComponent.getTokenUserInfo(token);
+        if (userInfoDto == null) {
+            throw new BusinessException("用户信息不存在");
+        }
+        exitMeetingRoom(userInfoDto, meetingMemberStatusEnum);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void finishMeeting(String meetingId, String userId) {
+        MeetingInfo meetingInfo = meetingInfoMapper.selectById(meetingId);
+        if (meetingInfo == null) {
+            throw new BusinessException("会议不存在");
+        }
+        if (MeetingStatusEnum.FINISHED.getStatus().equals(meetingInfo.getStatus())) {
+            // 会议已结束，直接返回，避免重复处理
+            return;
+        }
+        // 只有主持人可以主动结束会议，自动结束（userId=null）时跳过权限检查
+        if (userId != null && !meetingInfo.getCreateUserId().equals(userId)) {
+            throw new BusinessException("你没有权限");
+        }
+        
+        // 1. 更新 MeetingInfo 表状态
+        meetingInfo.setStatus(MeetingStatusEnum.FINISHED.getStatus());
+        meetingInfo.setEndTime(LocalDateTime.now());
+        meetingInfoMapper.updateById(meetingInfo);
+        
+        // 2. 获取会议中的所有成员（从 Redis）
+        List<MeetingMemberDto> memberList = redisComponent.getMeetingMemberList(meetingId);
+        
+        // 3. 构建并发送会议结束消息（只有还有成员时才发送）
+        if (memberList != null && !memberList.isEmpty()) {
+            MessageSendDto<String> messageSendDto = new MessageSendDto<>();
+            messageSendDto.setMessageType(MessageTypeEnum.FINIS_MEETING.getType());
+            messageSendDto.setMeetingId(meetingId);
+            messageSendDto.setMessageSendToType(MessageSendToTypeEnum.GROUP.getType());
+            messageSendDto.setSendUserId(userId);
+            messageSendDto.setMessageContent("会议已结束");
+            channelContextUtils.sendMessage(messageSendDto);
+        }
+        
+        // 4. 批量更新 MeetingMember 表（更新会议状态为已结束）
+        List<MeetingMember> dbMembers = meetingMemberMapper.selectByMeetingId(meetingId);
+        for (MeetingMember member : dbMembers) {
+            member.setMeetingStatus(MeetingStatusEnum.FINISHED.getStatus());
+            meetingMemberMapper.updateByMeetingIdAndUserId(member);
+        }
+        
+        // 5. 批量更新 TokenUserInfo（清除 currentMeetingId）并清理 WebSocket 房间
+        if (memberList != null) {
+            for (MeetingMemberDto member : memberList) {
+                String memberUserId = member.getUserId();
+                String token = redisComponent.getTokenByUserId(memberUserId);
+                if (token != null) {
+                    TokenUserInfoDto tokenUserInfo = redisComponent.getTokenUserInfo(token);
+                    if (tokenUserInfo != null && meetingId.equals(tokenUserInfo.getCurrentMeetingId())) {
+                        tokenUserInfo.setCurrentMeetingId(null);
+                        redisComponent.updateTokenUserInfo(tokenUserInfo);
+                    }
+                }
+                // 从 WebSocket 房间移除（需要检查 channel 是否存在）
+                io.netty.channel.Channel channel = channelContextUtils.getChannel(memberUserId);
+                if (channel != null) {
+                    channelContextUtils.leaveMeetingRoom(meetingId, channel);
+                }
+            }
+        }
+        
+        // 6. 清理 Redis 中的会议成员数据
+        redisComponent.removeMeetingMembers(meetingId);
+    }
+
+
 
 }
