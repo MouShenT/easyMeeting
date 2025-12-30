@@ -134,13 +134,13 @@ let durationTimer: number | null = null
 // 成员列表
 const members = ref<MeetingMember[]>([])
 
-// 视频流
-const videoStreams = ref<Record<string, MediaStream>>({})
+// 视频流 - 使用 reactive 确保深层响应式
+const videoStreams = reactive<Record<string, MediaStream | null>>({})
 const videoRefs = reactive<Record<string, HTMLVideoElement | null>>({})
 
-// 检查用户是否有视频流（使用 computed 确保响应式）
+// 检查用户是否有视频流
 function hasVideoStream(userId: string): boolean {
-  return !!videoStreams.value[userId]
+  return !!videoStreams[userId]
 }
 
 // 本地媒体状态
@@ -172,14 +172,14 @@ function setVideoRef(userId: string, el: any) {
   if (el) {
     videoRefs[userId] = el as HTMLVideoElement
     // 确保流被正确绑定
-    const stream = videoStreams.value[userId]
+    const stream = videoStreams[userId]
     if (stream) {
       (el as HTMLVideoElement).srcObject = stream
     } else if (userId === userStore.userId) {
       // 如果是自己但流还没准备好，尝试从 webRTCManager 获取
       const localStream = webRTCManager.getLocalStream()
       if (localStream) {
-        videoStreams.value[userId] = localStream
+        videoStreams[userId] = localStream
         ;(el as HTMLVideoElement).srcObject = localStream
       }
     }
@@ -207,7 +207,7 @@ async function initLocalMedia() {
   try {
     const stream = await webRTCManager.initLocalMedia(localVideoOpen.value, localAudioOpen.value)
     if (stream) {
-      videoStreams.value[userStore.userId] = stream
+      videoStreams[userStore.userId] = stream
       await nextTick()
       if (videoRefs[userStore.userId]) {
         videoRefs[userStore.userId]!.srcObject = stream
@@ -384,14 +384,17 @@ function cleanup() {
 function handleMemberJoin(message: WebSocketMessage<MeetingJoinContent>) {
   const content = message.messageContent
   if (content) {
-    const previousMemberIds = new Set(members.value.map(m => m.userId))
-    
     if (content.meetingMemberList && content.meetingMemberList.length > 0) {
       const localVideoState = localVideoOpen.value
       const localStream = webRTCManager.getLocalStream()
       
       // 保存现有的远程视频流
-      const existingStreams = { ...videoStreams.value }
+      const existingStreams: Record<string, MediaStream | null> = {}
+      Object.keys(videoStreams).forEach(userId => {
+        if (videoStreams[userId]) {
+          existingStreams[userId] = videoStreams[userId]
+        }
+      })
       
       members.value = content.meetingMemberList.map(member => ({
         ...member,
@@ -401,13 +404,13 @@ function handleMemberJoin(message: WebSocketMessage<MeetingJoinContent>) {
       // 恢复所有视频流
       Object.keys(existingStreams).forEach(userId => {
         if (existingStreams[userId]) {
-          videoStreams.value[userId] = existingStreams[userId]
+          videoStreams[userId] = existingStreams[userId]
         }
       })
       
       // 确保自己的视频流被保留
       if (localStream) {
-        videoStreams.value[userStore.userId] = localStream
+        videoStreams[userStore.userId] = localStream
         nextTick(() => {
           if (videoRefs[userStore.userId]) {
             videoRefs[userStore.userId]!.srcObject = localStream
@@ -421,17 +424,42 @@ function handleMemberJoin(message: WebSocketMessage<MeetingJoinContent>) {
         creatorId.value = creator.userId
       }
       
-      // 与新成员建立 WebRTC 连接
+      // 与其他成员建立 WebRTC 连接
+      // 策略：新加入的成员主动向所有现有成员发起连接
+      // 判断是否是新成员：如果 newMember 是自己，说明自己刚加入
+      const iAmNewMember = content.newMember?.userId === userStore.userId
+      
+      console.log('=== handleMemberJoin ===')
+      console.log('My userId:', userStore.userId)
+      console.log('newMember:', content.newMember?.userId)
+      console.log('iAmNewMember:', iAmNewMember)
+      console.log('Total members:', members.value.length)
+      console.log('Current connections:', webRTCManager.getConnectionCount())
+      
       members.value.forEach(member => {
-        if (member.userId !== userStore.userId && !previousMemberIds.has(member.userId)) {
-          // 新成员加入，发起连接
-          console.log('New member joined, initiating connection to:', member.userId)
-          webRTCManager.initiateConnection(member.userId)
-        } else if (member.userId !== userStore.userId && !webRTCManager.hasConnection(member.userId)) {
-          // 已有成员但没有连接，根据 userId 大小决定谁发起
-          if (userStore.userId > member.userId) {
-            console.log('No connection exists, initiating connection to:', member.userId)
-            webRTCManager.initiateConnection(member.userId)
+        if (member.userId !== userStore.userId) {
+          const hasConnection = webRTCManager.hasConnection(member.userId)
+          
+          console.log(`Checking member ${member.userId}: hasConnection=${hasConnection}`)
+          
+          if (!hasConnection) {
+            if (iAmNewMember) {
+              // 我是新加入的，主动向所有现有成员发起连接
+              console.log('I am new member, initiating connection to:', member.userId)
+              webRTCManager.initiateConnection(member.userId)
+            } else if (content.newMember && content.newMember.userId === member.userId) {
+              // 有新成员加入，等待新成员向我发起连接
+              console.log('New member joined:', member.userId, '- waiting for them to initiate')
+            } else {
+              // 既不是我新加入，也不是对方新加入，使用 userId 比较决定谁发起
+              // 这种情况可能发生在网络重连或其他边缘情况
+              if (userStore.userId > member.userId) {
+                console.log('Fallback: initiating connection to:', member.userId)
+                webRTCManager.initiateConnection(member.userId)
+              } else {
+                console.log('Fallback: waiting for connection from:', member.userId)
+              }
+            }
           }
         }
       })
@@ -453,17 +481,22 @@ function handleMemberExit(message: WebSocketMessage<MeetingExitContent>) {
       const exitStatus = content?.exitStatus
       if (exitStatus === MemberStatus.KICK_OUT) {
         ElMessage.warning('您已被移出会议')
+        cleanup()
+        router.push('/')
+        return
       } else if (exitStatus === MemberStatus.BLACKLIST) {
         ElMessage.error('您已被拉黑，无法重新加入此会议')
+        cleanup()
+        router.push('/')
+        return
       }
-      cleanup()
-      router.push('/')
+      // 正常退出（EXIT_MEETING）不需要处理，因为是自己主动离开的
       return
     }
     
     members.value = members.value.filter(m => m.userId !== exitUserId)
     webRTCManager.closeConnection(exitUserId)
-    delete videoStreams.value[exitUserId]
+    delete videoStreams[exitUserId]
     
     const nickName = message.sendUserNickName || '成员'
     ElMessage.info(`${nickName} 离开了会议`)
@@ -501,12 +534,17 @@ function handleMeetingEnd(_message: WebSocketMessage) {
 // 远程流回调
 function onRemoteStream(userId: string, stream: MediaStream) {
   console.log('Received remote stream for user:', userId, 'tracks:', stream.getTracks().length)
-  videoStreams.value[userId] = stream
+  
+  // 使用 Vue 的响应式方式设置流
+  videoStreams[userId] = stream
   
   // 强制更新成员的 videoOpen 状态
   const member = members.value.find(m => m.userId === userId)
   if (member) {
     member.videoOpen = true
+    console.log('Set videoOpen=true for member:', userId)
+  } else {
+    console.warn('Member not found for userId:', userId)
   }
   
   nextTick(() => {
@@ -520,6 +558,8 @@ function onRemoteStream(userId: string, stream: MediaStream) {
         if (videoRefs[userId]) {
           videoRefs[userId]!.srcObject = stream
           console.log('Retry: Set srcObject for user:', userId)
+        } else {
+          console.error('Video ref still not found after retry for user:', userId)
         }
       }, 500)
     }
@@ -527,7 +567,7 @@ function onRemoteStream(userId: string, stream: MediaStream) {
 }
 
 function onStreamRemoved(userId: string) {
-  delete videoStreams.value[userId]
+  delete videoStreams[userId]
 }
 
 // 初始化

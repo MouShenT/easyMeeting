@@ -67,11 +67,13 @@ export interface MeetingExitContent {
   meetingMemberList: MeetingMember[]
 }
 
-// 成员状态枚举
+// 成员状态枚举（与后端 MeetingMemberStatusEnum 对应）
 export enum MemberStatus {
-  NORMAL = 0,      // 正常
-  KICK_OUT = 1,    // 被踢出
-  BLACKLIST = 2    // 被拉黑
+  DEL_MEETING = 0,   // 删除会议
+  NORMAL = 1,        // 正常
+  EXIT_MEETING = 2,  // 正常退出会议
+  KICK_OUT = 3,      // 被踢出会议
+  BLACKLIST = 4      // 被拉黑
 }
 
 // 成员类型枚举（与后端 MemberTypeEnum 对应）
@@ -248,12 +250,28 @@ class WebSocketService {
 
   // 心跳检测
   private startHeartbeat() {
+    // 立即发送一次心跳，确保连接建立后马上有消息交互
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send('ping')
+    }
+    
     this.heartbeatTimer = window.setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
-        // 发送心跳包（空消息或特定格式）
+        // 发送心跳包
         this.ws.send('ping')
+        console.log('Heartbeat sent')
       }
-    }, 30000) // 每30秒发送一次心跳
+    }, 25000) // 每25秒发送一次心跳（比后端120秒超时更频繁）
+    
+    // 监听页面可见性变化，页面重新可见时立即发送心跳
+    document.addEventListener('visibilitychange', this.handleVisibilityChange)
+  }
+  
+  private handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible' && this.ws?.readyState === WebSocket.OPEN) {
+      console.log('Page became visible, sending heartbeat')
+      this.ws.send('ping')
+    }
   }
 
   private stopHeartbeat() {
@@ -261,6 +279,8 @@ class WebSocketService {
       clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = null
     }
+    // 移除可见性监听
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange)
   }
 
   // 重连逻辑

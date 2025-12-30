@@ -49,8 +49,8 @@ public class NettyWebSocketStarter implements Runnable {
                             pipeline.addLast(new HttpServerCodec());
                             //消息聚合器
                             pipeline.addLast(new HttpObjectAggregator(64*1024));
-                            //心跳检测
-                            pipeline.addLast(new IdleStateHandler(60,0,0));
+                            //心跳检测 - 读空闲超时设为120秒，防止浏览器后台节流导致心跳延迟
+                            pipeline.addLast(new IdleStateHandler(120,0,0));
                             //自定义的心跳处理器，可以提取当前连接断开的userid
                             pipeline.addLast(new HandlerHeartBeat(channelContextUtils));
                             //token校验，拦截channelread事件，
