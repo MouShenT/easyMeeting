@@ -1,7 +1,6 @@
 package com.easymeeting.dto;
 
 
-import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -19,7 +18,7 @@ public class MeetingCreateDto {
     @NotNull
     Integer joinType;
 
-    @Max(5)
+    @Size(max = 5, message = "会议密码最多5位")
     String joinPassword;
 
 

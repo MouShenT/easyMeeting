@@ -76,22 +76,32 @@
     <!-- ==================== 分页查询历史会议 ==================== -->
     <!-- mm.status = 1 表示 NORMAL 状态，过滤掉已删除、退出、被踢出、被拉黑的会议成员 -->
 
-    <!-- 查询所有历史会议（我创建的 + 我参加的，成员状态为正常） -->
+    <!-- 查询所有历史会议（我创建的 + 我参加的，成员状态为正常），使用 UNION 优化性能 -->
     <select id="selectAllMeetings" resultMap="BaseResultMap">
-        SELECT DISTINCT mi.meeting_id, mi.meeting_no, mi.meeting_name, mi.create_time, 
-               mi.create_user_id, mi.join_type, mi.join_password, mi.start_time, mi.end_time, mi.status
-        FROM meeting_info mi
-        LEFT JOIN meeting_member mm ON mi.meeting_id = mm.meeting_id AND mm.status = 1
-        WHERE mi.create_user_id = #{userId} OR (mm.user_id = #{userId} AND mm.status = 1)
-        ORDER BY mi.create_time DESC
+        SELECT * FROM (
+            SELECT mi.meeting_id, mi.meeting_no, mi.meeting_name, mi.create_time, 
+                   mi.create_user_id, mi.join_type, mi.join_password, mi.start_time, mi.end_time, mi.status
+            FROM meeting_info mi
+            WHERE mi.create_user_id = #{userId}
+            UNION
+            SELECT mi.meeting_id, mi.meeting_no, mi.meeting_name, mi.create_time, 
+                   mi.create_user_id, mi.join_type, mi.join_password, mi.start_time, mi.end_time, mi.status
+            FROM meeting_info mi
+            INNER JOIN meeting_member mm ON mi.meeting_id = mm.meeting_id
+            WHERE mm.user_id = #{userId} AND mm.status = 1
+        ) AS combined
+        ORDER BY create_time DESC
         LIMIT #{offset}, #{pageSize}
     </select>
 
     <select id="countAllMeetings" resultType="java.lang.Long">
-        SELECT COUNT(DISTINCT mi.meeting_id)
-        FROM meeting_info mi
-        LEFT JOIN meeting_member mm ON mi.meeting_id = mm.meeting_id AND mm.status = 1
-        WHERE mi.create_user_id = #{userId} OR (mm.user_id = #{userId} AND mm.status = 1)
+        SELECT COUNT(*) FROM (
+            SELECT mi.meeting_id FROM meeting_info mi WHERE mi.create_user_id = #{userId}
+            UNION
+            SELECT mi.meeting_id FROM meeting_info mi
+            INNER JOIN meeting_member mm ON mi.meeting_id = mm.meeting_id
+            WHERE mm.user_id = #{userId} AND mm.status = 1
+        ) AS combined
     </select>
 
     <!-- 查询我创建的会议 -->

@@ -1,38 +1,39 @@
 <template>
-  <div class="home-container">
-    <NavBar />
-    <div class="home-content">
-      <!-- 当前进行中的会议 -->
+  <AppShell>
+    <div class="home-page">
+      <!-- Current Meeting Banner -->
       <CurrentMeetingCard 
         v-if="currentMeeting" 
         :meeting="currentMeeting" 
         @rejoin="handleRejoinMeeting" 
       />
       
-      <div class="user-card">
-        <div class="avatar">{{ userStore.nickName.charAt(0) }}</div>
-        <div class="user-detail">
-          <div class="nick-name">{{ userStore.nickName }}</div>
-          <div class="meeting-no">个人会议号: {{ userStore.meetingNo }}</div>
+      <div class="home-content">
+        <!-- Action Panel -->
+        <div class="action-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">快速开始</h2>
+          </div>
+          <div class="action-grid">
+            <ActionCard label="加入会议" :icon="Plus" @click="handleJoinMeeting" />
+            <ActionCard label="快速会议" :icon="VideoCamera" @click="handleStartMeeting" />
+            <ActionCard label="预定会议" :icon="Calendar" @click="handleScheduleMeeting" />
+            <ActionCard label="历史会议" :icon="Clock" @click="handleHistoryMeeting" />
+          </div>
         </div>
-      </div>
-      <div class="action-grid">
-        <div class="action-item" @click="handleStartMeeting">
-          <el-icon :size="40"><VideoCamera /></el-icon>
-          <span>发起会议</span>
-        </div>
-        <div class="action-item" @click="handleJoinMeeting">
-          <el-icon :size="40"><Plus /></el-icon>
-          <span>加入会议</span>
-        </div>
-        <div class="action-item" @click="handleHistory">
-          <el-icon :size="40"><Clock /></el-icon>
-          <span>历史会议</span>
-        </div>
+        
+        <!-- Schedule Panel -->
+        <SchedulePanel
+          :meetings="todayMeetings"
+          :loading="meetingsLoading"
+          @meeting-click="handleMeetingClick"
+          @view-all="handleViewAllMeetings"
+        />
       </div>
     </div>
-    <!-- 快速会议对话框 -->
-    <el-dialog v-model="quickMeetingDialogVisible" title="发起会议" width="450px">
+    
+    <!-- Quick Meeting Dialog -->
+    <el-dialog v-model="quickMeetingDialogVisible" title="发起会议" width="450px" :close-on-click-modal="false">
       <el-form :model="quickMeetingForm" label-width="100px">
         <el-form-item label="会议号类型">
           <el-radio-group v-model="quickMeetingForm.meetingNoType">
@@ -53,8 +54,8 @@
       </template>
     </el-dialog>
 
-    <!-- 加入会议对话框 -->
-    <el-dialog v-model="joinDialogVisible" title="加入会议" width="400px">
+    <!-- Join Meeting Dialog -->
+    <el-dialog v-model="joinDialogVisible" title="加入会议" width="400px" :close-on-click-modal="false">
       <el-form :model="joinMeetingForm" label-width="100px">
         <el-form-item label="会议号" required>
           <el-input v-model="joinMeetingForm.meetingNo" placeholder="请输入10位会议号" maxlength="10" />
@@ -74,26 +75,35 @@
         <el-button type="primary" :loading="joinMeetingLoading" @click="confirmJoin">加入会议</el-button>
       </template>
     </el-dialog>
-  </div>
+  </AppShell>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { VideoCamera, Plus, Clock } from '@element-plus/icons-vue'
-import NavBar from '@/components/NavBar.vue'
+import { VideoCamera, Plus, Calendar, Clock } from '@element-plus/icons-vue'
+import AppShell from '@/components/AppShell.vue'
+import ActionCard from '@/components/ActionCard.vue'
+import SchedulePanel from '@/components/SchedulePanel.vue'
 import CurrentMeetingCard from '@/components/CurrentMeetingCard.vue'
+import type { ScheduleMeeting } from '@/components/SchedulePanel.vue'
 import { useUserStore } from '@/stores/user'
 import { quickMeeting, joinMeeting, preJoinMeeting, getCurrentMeeting } from '@/api/meeting'
+import { loadTodayMeeting } from '@/api/reserve'
 import type { QuickMeetingForm, JoinMeetingForm, MeetingInfo } from '@/types'
 
 const router = useRouter()
 const userStore = useUserStore()
 
-// 当前进行中的会议
+// Current meeting state
 const currentMeeting = ref<MeetingInfo | null>(null)
 
+// Today's meetings
+const todayMeetings = ref<ScheduleMeeting[]>([])
+const meetingsLoading = ref(false)
+
+// Quick meeting dialog
 const quickMeetingDialogVisible = ref(false)
 const quickMeetingLoading = ref(false)
 const quickMeetingForm = reactive<QuickMeetingForm>({
@@ -103,6 +113,7 @@ const quickMeetingForm = reactive<QuickMeetingForm>({
   joinPassword: ''
 })
 
+// Join meeting dialog
 const joinDialogVisible = ref(false)
 const joinMeetingLoading = ref(false)
 const joinMeetingForm = reactive<JoinMeetingForm>({
@@ -112,7 +123,7 @@ const joinMeetingForm = reactive<JoinMeetingForm>({
   videoOpen: true
 })
 
-// 加载当前进行中的会议
+// Load current meeting
 async function loadCurrentMeeting() {
   try {
     currentMeeting.value = await getCurrentMeeting()
@@ -121,11 +132,45 @@ async function loadCurrentMeeting() {
   }
 }
 
-// 重新加入会议
+// Load today's meetings
+async function loadTodayMeetings() {
+  meetingsLoading.value = true
+  try {
+    const reserves = await loadTodayMeeting()
+    // 转换为 ScheduleMeeting 格式，使用数据库 status 字段判断状态
+    todayMeetings.value = reserves.map(reserve => ({
+      id: reserve.meetingId,
+      name: reserve.meetingName,
+      meetingNo: reserve.realMeetingId || reserve.meetingId,
+      startTime: reserve.startTime,
+      duration: reserve.duration,
+      status: getReserveStatus(reserve.status),
+      realMeetingId: reserve.realMeetingId
+    }))
+  } catch (error) {
+    console.error('获取今日会议失败:', error)
+  } finally {
+    meetingsLoading.value = false
+  }
+}
+
+// 根据数据库 status 字段获取会议状态
+// 0: 待开始, 1: 进行中, 2: 已结束, 3: 已取消
+function getReserveStatus(status: number): 'ongoing' | 'upcoming' | 'ended' {
+  switch (status) {
+    case 1: return 'ongoing'
+    case 2: return 'ended'
+    case 3: return 'ended'
+    default: return 'upcoming'
+  }
+}
+
+// Rejoin meeting
 function handleRejoinMeeting(meetingId: string) {
   router.push(`/meeting/${meetingId}`)
 }
 
+// Reset forms
 function resetQuickMeetingForm() {
   quickMeetingForm.meetingNoType = 0
   quickMeetingForm.meetingName = ''
@@ -140,8 +185,8 @@ function resetJoinMeetingForm() {
   joinMeetingForm.videoOpen = true
 }
 
+// Action handlers
 function handleStartMeeting() {
-  // 如果有正在进行的会议，提示用户
   if (currentMeeting.value) {
     ElMessage.warning('您有正在进行的会议，请先结束或退出当前会议')
     return
@@ -150,6 +195,24 @@ function handleStartMeeting() {
   quickMeetingDialogVisible.value = true
 }
 
+function handleJoinMeeting() {
+  if (currentMeeting.value) {
+    router.push(`/meeting/${currentMeeting.value.meetingId}`)
+    return
+  }
+  resetJoinMeetingForm()
+  joinDialogVisible.value = true
+}
+
+function handleScheduleMeeting() {
+  router.push('/schedule')
+}
+
+function handleHistoryMeeting() {
+  router.push('/history')
+}
+
+// Confirm quick meeting
 async function confirmQuickMeeting() {
   if (!quickMeetingForm.meetingName.trim()) {
     ElMessage.warning('请输入会议主题')
@@ -166,7 +229,6 @@ async function confirmQuickMeeting() {
     await joinMeeting({ videoOpen: true })
     ElMessage.success('会议创建成功')
     quickMeetingDialogVisible.value = false
-    // 跳转到会议页面
     router.push(`/meeting/${meetingId}`)
   } catch (error) {
     console.error('创建会议失败:', error)
@@ -175,16 +237,7 @@ async function confirmQuickMeeting() {
   }
 }
 
-function handleJoinMeeting() {
-  // 如果有正在进行的会议，直接跳转到该会议
-  if (currentMeeting.value) {
-    router.push(`/meeting/${currentMeeting.value.meetingId}`)
-    return
-  }
-  resetJoinMeetingForm()
-  joinDialogVisible.value = true
-}
-
+// Confirm join meeting
 async function confirmJoin() {
   if (!/^\d{10}$/.test(joinMeetingForm.meetingNo)) {
     ElMessage.warning('请输入10位会议号')
@@ -196,17 +249,14 @@ async function confirmJoin() {
   }
   joinMeetingLoading.value = true
   try {
-    // 先调用 preJoinMeeting 验证会议信息
     const meetingId = await preJoinMeeting({
       meetingNo: joinMeetingForm.meetingNo,
       nickName: joinMeetingForm.nickName.trim(),
       password: joinMeetingForm.joinPassword || undefined
     })
-    // 验证通过后，调用 joinMeeting 正式加入
     await joinMeeting({ videoOpen: joinMeetingForm.videoOpen })
     ElMessage.success('加入会议成功')
     joinDialogVisible.value = false
-    // 跳转到会议页面
     router.push(`/meeting/${meetingId}`)
   } catch (error) {
     console.error('加入会议失败:', error)
@@ -215,82 +265,68 @@ async function confirmJoin() {
   }
 }
 
-function handleHistory() {
+// Meeting list handlers
+function handleMeetingClick(meeting: ScheduleMeeting) {
+  joinMeetingForm.meetingNo = meeting.meetingNo
+  joinMeetingForm.nickName = userStore.nickName || ''
+  joinDialogVisible.value = true
+}
+
+function handleViewAllMeetings() {
   router.push('/history')
 }
 
-// 页面加载时获取当前会议
+// Initialize - 并行加载数据
 onMounted(() => {
-  loadCurrentMeeting()
+  Promise.all([
+    loadCurrentMeeting(),
+    loadTodayMeetings()
+  ])
 })
 </script>
 
 <style scoped>
-.home-container {
+.home-page {
+  padding: var(--spacing-xl);
   min-height: 100vh;
-  background: #f5f7fa;
+  background: var(--color-bg-light);
 }
+
 .home-content {
-  padding: 40px;
-  max-width: 800px;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--spacing-xl);
+  max-width: 1200px;
   margin: 0 auto;
 }
-.user-card {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 30px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  margin-bottom: 40px;
+
+.action-panel {
+  background: var(--color-bg-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
 }
-.avatar {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #fff;
-  font-size: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+
+.panel-header {
+  margin-bottom: var(--spacing-lg);
 }
-.nick-name {
-  font-size: 24px;
-  font-weight: 500;
-  margin-bottom: 8px;
+
+.panel-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
-.meeting-no {
-  color: #909399;
-  font-size: 14px;
-}
+
 .action-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-md);
 }
-.action-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 40px 20px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-.action-item:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-.action-item span {
-  font-size: 16px;
-  color: #333;
-}
-.action-item .el-icon {
-  color: #409eff;
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .home-content {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

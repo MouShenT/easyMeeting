@@ -45,4 +45,5 @@ public interface MeetingInfoService {
 
     void forceExitMeetingRoom(TokenUserInfoDto tokenUserInfoDto, String userId,MeetingMemberStatusEnum meetingMemberStatusEnum);
     void finishMeeting(String meetingId,String userId);
+    void reserveJoinMeeting(String meetingId,TokenUserInfoDto tokenUserInfoDto,String password);
 }

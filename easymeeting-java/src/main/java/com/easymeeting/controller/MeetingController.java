@@ -4,12 +4,14 @@ import com.easymeeting.dto.JoinMeetingDto;
 import com.easymeeting.dto.MeetingCreateDto;
 import com.easymeeting.dto.TokenUserInfoDto;
 import com.easymeeting.entity.MeetingInfo;
+import com.easymeeting.entity.MeetingMember;
 import com.easymeeting.enums.MeetingMemberStatusEnum;
 import com.easymeeting.enums.MeetingStatusEnum;
 import com.easymeeting.exception.BusinessException;
 import com.easymeeting.interceptor.TokenInterceptor;
 import com.easymeeting.redis.RedisComponent;
 import com.easymeeting.service.MeetingInfoService;
+import com.easymeeting.service.impl.MeetingMemberServiceImpl;
 import com.easymeeting.utils.StringUtils;
 import com.easymeeting.vo.PageResult;
 import com.easymeeting.vo.ResponseVO;
@@ -21,6 +23,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+import java.util.Optional;
 
 
 @RestController
@@ -32,6 +36,7 @@ public class MeetingController {
 
     private final MeetingInfoService meetingInfoService;
     private final RedisComponent redisComponent;
+    private final MeetingMemberServiceImpl meetingMemberServiceImpl;
 
     /**
      * 加载所有历史会议（我创建的 + 我参加的）
@@ -177,6 +182,51 @@ public class MeetingController {
         return ResponseVO.success(meetingInfo);
     }
 
+    /**
+     * 删除历史会议的显示
+     * @param meetingId
+     * @param request
+     * @return
+     */
+    @GetMapping("/delMeetingRecord")
+    public ResponseVO<Void> delMeetingRecord( @NotEmpty String meetingId, HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        MeetingMember meetingMember=meetingMemberServiceImpl.getMember(meetingId,tokenUserInfoDto.getUserId());
+        meetingMember.setStatus(MeetingMemberStatusEnum.DEL_MEETING.getStatus());
+        meetingMemberServiceImpl.updateMember(meetingMember);
+        return ResponseVO.success();
+    }
+
+    /**
+     * 查看历史会议会议的成员信息
+     * @param meetingId
+     * @param request
+     * @return
+     */
+    @GetMapping("/loadMeetingMembers")
+    public ResponseVO<List<MeetingMember>> loadMeetingMembers( @NotEmpty String meetingId, HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        List<MeetingMember> meetingMemberList=meetingMemberServiceImpl.getMembersByMeetingId(meetingId);
+        // 检查当前用户是否在会议成员列表中
+        Optional<MeetingMember> currentUserMember = meetingMemberList.stream()
+                .filter(member -> member.getUserId().equals(tokenUserInfoDto.getUserId()))
+                .findFirst();
+        if(!currentUserMember.isPresent()){
+            throw new BusinessException("你不在会议中，无法查看成员信息");
+        }
+        return ResponseVO.success(meetingMemberList);
+    }
+    @RequestMapping("/reserveJoinMeeting")
+    public ResponseVO<Void> reserveJoinMeeting( @NotEmpty String meetingId,@NotEmpty String nickName, String password,HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        tokenUserInfoDto.setNickName(nickName);
+        meetingInfoService.reserveJoinMeeting(meetingId,tokenUserInfoDto,password);
+        return ResponseVO.success(null);
+    }
+
+
+
 
 
 }
+

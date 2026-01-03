@@ -61,3 +61,10 @@ export function blacklistMember(userId: string): Promise<void> {
 export function finishMeeting(): Promise<void> {
   return request.get('/meeting/finishMeeting')
 }
+
+// 重新加入历史会议 - 设置 currentMeetingId 到 token
+export function reserveJoinMeeting(meetingId: string, nickName: string, password?: string): Promise<void> {
+  return request.post('/meeting/reserveJoinMeeting', null, {
+    params: { meetingId, nickName, password }
+  })
+}

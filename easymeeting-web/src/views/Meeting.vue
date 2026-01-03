@@ -650,72 +650,88 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background-color: #1a1a1a;
-  color: #fff;
+  background-color: #0a0a0a;
+  color: var(--color-text-white);
+  font-family: var(--font-family);
 }
 
+/* 顶部工具栏 - 极简风格 */
 .meeting-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
-  background-color: #2d2d2d;
-  border-bottom: 1px solid #3d3d3d;
+  padding: var(--spacing-md) var(--spacing-xl);
+  background-color: rgba(10, 10, 10, 0.98);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--spacing-lg);
 }
 
 .back-btn {
-  color: #fff;
-  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: var(--font-size-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
 }
 
 .back-btn:hover {
-  color: #409eff;
+  color: var(--color-text-white);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .meeting-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .meeting-name {
-  font-size: 16px;
-  font-weight: 500;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .meeting-id {
-  font-size: 12px;
-  color: #999;
+  font-size: var(--font-size-xs);
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 400;
 }
 
 .meeting-time {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  color: #ccc;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: rgba(255, 255, 255, 0.6);
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-full);
 }
 
+/* 视频区域 */
 .video-area {
   flex: 1;
-  padding: 16px;
+  padding: var(--spacing-lg);
   overflow: hidden;
+  background: linear-gradient(180deg, #0a0a0a 0%, #111111 100%);
 }
 
 .video-grid {
   display: grid;
-  gap: 8px;
+  gap: var(--spacing-md);
   height: 100%;
 }
 
 .video-grid.grid-1 {
   grid-template-columns: 1fr;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
 .video-grid.grid-2 {
@@ -739,13 +755,20 @@ onUnmounted(() => {
 
 .video-item {
   position: relative;
-  background-color: #2d2d2d;
-  border-radius: 8px;
+  background-color: #1a1a1a;
+  border-radius: var(--radius-lg);
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all var(--transition-normal);
+}
+
+.video-item:hover {
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .video-item.is-self {
-  border: 2px solid #409eff;
+  border: 2px solid var(--color-accent);
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.15);
 }
 
 .video-item video {
@@ -760,86 +783,158 @@ onUnmounted(() => {
   justify-content: center;
   width: 100%;
   height: 100%;
-  background-color: #3d3d3d;
+  background: linear-gradient(135deg, #1a1a1a 0%, #252525 100%);
 }
 
 .video-placeholder .avatar {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background-color: #409eff;
+  width: 88px;
+  height: 88px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--color-accent) 0%, #b8962e 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 32px;
-  font-weight: 500;
-  color: #fff;
+  font-size: var(--font-size-3xl);
+  font-weight: 600;
+  color: #0a0a0a;
+  box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3);
 }
 
 .member-info {
   position: absolute;
-  bottom: 8px;
-  left: 8px;
+  bottom: var(--spacing-md);
+  left: var(--spacing-md);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background-color: rgba(0, 0, 0, 0.6);
-  border-radius: 4px;
-  font-size: 12px;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  background-color: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
 }
 
 .member-info .video-off {
-  color: #f56c6c;
+  color: var(--color-error);
 }
 
+/* 底部控制栏 - 现代极简风格 */
 .meeting-controls {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 32px;
-  padding: 16px 20px;
-  background-color: #2d2d2d;
-  border-top: 1px solid #3d3d3d;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-lg) var(--spacing-xl);
+  background-color: rgba(10, 10, 10, 0.98);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
 }
 
 .control-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: var(--spacing-xs);
   cursor: pointer;
-  padding: 8px 16px;
-  border-radius: 8px;
-  transition: background-color 0.2s;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-fast);
+  min-width: 72px;
 }
 
 .control-item:hover {
-  background-color: #3d3d3d;
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .control-item span {
-  font-size: 12px;
-  color: #ccc;
+  font-size: var(--font-size-xs);
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.control-item .el-icon {
+  color: var(--color-text-white);
+  transition: all var(--transition-fast);
+}
+
+.control-item:hover .el-icon {
+  color: var(--color-accent);
+  transform: scale(1.1);
+}
+
+.control-item:hover span {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .control-item .is-off {
-  color: #f56c6c;
+  color: var(--color-error);
 }
 
 .control-item.end-meeting {
-  color: #f56c6c;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.control-item.end-meeting .el-icon {
+  color: var(--color-error);
 }
 
 .control-item.end-meeting:hover {
-  background-color: rgba(245, 108, 108, 0.2);
+  background-color: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.control-item.end-meeting span {
+  color: var(--color-error);
 }
 
 .control-item.leave {
-  color: #e6a23c;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.control-item.leave .el-icon {
+  color: var(--color-warning);
 }
 
 .control-item.leave:hover {
-  background-color: rgba(230, 162, 60, 0.2);
+  background-color: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.control-item.leave span {
+  color: var(--color-warning);
+}
+
+/* Drawer 样式覆盖 - 保持一致的设计语言 */
+:deep(.el-drawer) {
+  background: var(--color-bg-white);
+  border-left: 1px solid var(--color-border);
+}
+
+:deep(.el-drawer__header) {
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 0;
+  padding: var(--spacing-lg) var(--spacing-xl);
+}
+
+:deep(.el-drawer__title) {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  font-size: var(--font-size-lg);
+}
+
+:deep(.el-drawer__body) {
+  padding: 0;
+}
+
+:deep(.el-drawer__close-btn) {
+  color: var(--color-text-secondary);
+}
+
+:deep(.el-drawer__close-btn:hover) {
+  color: var(--color-text-primary);
 }
 </style>

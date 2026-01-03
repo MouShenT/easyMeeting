@@ -3,10 +3,13 @@ package com.easymeeting.service.impl;
 import com.easymeeting.dto.*;
 import com.easymeeting.entity.MeetingInfo;
 import com.easymeeting.entity.MeetingMember;
+import com.easymeeting.entity.MeetingReserve;
 import com.easymeeting.enums.*;
 import com.easymeeting.exception.BusinessException;
 import com.easymeeting.mapper.MeetingInfoMapper;
 import com.easymeeting.mapper.MeetingMemberMapper;
+import com.easymeeting.mapper.MeetingReserveMapper;
+import com.easymeeting.mapper.MeetingReserveMemberMapper;
 import com.easymeeting.redis.RedisComponent;
 import com.easymeeting.service.MeetingInfoService;
 import com.easymeeting.utils.StringUtils;
@@ -30,6 +33,10 @@ public class MeetingInfoServiceImpl implements MeetingInfoService {
     private MeetingMemberMapper meetingMemberMapper;
     @Resource
     private RedisComponent redisComponent;
+    @Resource
+    private MeetingReserveMemberMapper meetingReserveMemberMapper;
+    @Resource
+    private MeetingReserveMapper meetingReserveMapper;
 
     @Override
     public MeetingInfo createMeeting(MeetingInfo meetingInfo) {
@@ -96,6 +103,10 @@ public class MeetingInfoServiceImpl implements MeetingInfoService {
     public void quickMeeting(MeetingInfo meetingInfo, String nickName) {
         meetingInfo.setCreateTime(LocalDateTime.now());
         meetingInfo.setMeetingId(StringUtils.generateMeetingNo());
+        // 如果没有设置 meetingNo，自动生成一个（预约会议开始时会用到）
+        if (StringUtils.isEmpty(meetingInfo.getMeetingNo())) {
+            meetingInfo.setMeetingNo(StringUtils.generateMeetingNo());
+        }
         meetingInfo.setStartTime(LocalDateTime.now());
         meetingInfo.setStatus(MeetingStatusEnum.RUNING.getStatus());
         meetingInfoMapper.insert(meetingInfo);
@@ -315,6 +326,13 @@ public class MeetingInfoServiceImpl implements MeetingInfoService {
             meetingMemberMapper.updateByMeetingIdAndUserId(member);
         }
         
+        // 4.1 更新预约会议状态为已结束（如果该会议是从预约会议开始的）
+        MeetingReserve meetingReserve = meetingReserveMapper.selectByRealMeetingId(meetingId);
+        if (meetingReserve != null) {
+            meetingReserve.setStatus(MeetingReserveStatusEnum.FINISHED.getStatus());
+            meetingReserveMapper.updateById(meetingReserve);
+        }
+        
         // 5. 批量更新 TokenUserInfo（清除 currentMeetingId）并清理 WebSocket 房间
         if (memberList != null) {
             for (MeetingMemberDto member : memberList) {
@@ -339,6 +357,40 @@ public class MeetingInfoServiceImpl implements MeetingInfoService {
         redisComponent.removeMeetingMembers(meetingId);
     }
 
+    @Override
+    public void reserveJoinMeeting(String meetingId, TokenUserInfoDto tokenUserInfoDto, String password) {
+        String userId = tokenUserInfoDto.getUserId();
+        
+        // 1. 查询会议是否存在
+        MeetingInfo meetingInfo = meetingInfoMapper.selectById(meetingId);
+        if (meetingInfo == null) {
+            throw new BusinessException("会议不存在");
+        }
+        
+        // 2. 检查会议状态
+        if (MeetingStatusEnum.FINISHED.getStatus().equals(meetingInfo.getStatus())) {
+            throw new BusinessException("会议已结束");
+        }
+        
+        // 3. 检查用户是否有未结束的其他会议
+        if (StringUtils.isNotEmpty(tokenUserInfoDto.getCurrentMeetingId()) 
+                && !meetingId.equals(tokenUserInfoDto.getCurrentMeetingId())) {
+            throw new BusinessException("你有未结束的会议");
+        }
+        
+        // 4. 检查是否被拉黑
+        checkMeetingJoin(meetingId, userId);
+        
+        // 5. 验证密码（如果需要）
+        if (MeetingJoinTypeEnum.PASSWORD.getType().equals(meetingInfo.getJoinType()) 
+                && !meetingInfo.getJoinPassword().equals(password)) {
+            throw new BusinessException("密码错误");
+        }
+        
+        // 6. 设置 currentMeetingId 到 token
+        tokenUserInfoDto.setCurrentMeetingId(meetingId);
+        redisComponent.updateTokenUserInfo(tokenUserInfoDto);
+    }
 
 
 }

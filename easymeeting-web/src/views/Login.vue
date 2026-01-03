@@ -1,26 +1,60 @@
 <template>
-  <div class="login-container">
-    <div class="login-box">
-      <h2>登录 EasyMeeting</h2>
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="0">
+  <div class="login-page">
+    <div class="login-card">
+      <!-- Logo -->
+      <div class="login-logo">
+        <span class="logo-mark">E</span>
+        <span class="logo-text">EasyMeeting</span>
+      </div>
+      
+      <!-- Form -->
+      <el-form ref="formRef" :model="form" :rules="rules" class="login-form">
         <el-form-item prop="email">
-          <el-input v-model="form.email" placeholder="请输入邮箱" prefix-icon="Message" />
+          <el-input 
+            v-model="form.email" 
+            placeholder="邮箱" 
+            size="large"
+            :prefix-icon="Message"
+          />
         </el-form-item>
+        
         <el-form-item prop="password">
-          <el-input v-model="form.password" type="password" placeholder="请输入密码" prefix-icon="Lock" show-password />
+          <el-input 
+            v-model="form.password" 
+            type="password" 
+            placeholder="密码" 
+            size="large"
+            :prefix-icon="Lock"
+            show-password
+          />
         </el-form-item>
+        
         <el-form-item prop="checkCode">
           <div class="check-code-row">
-            <el-input v-model="form.checkCode" placeholder="请输入验证码" />
+            <el-input 
+              v-model="form.checkCode" 
+              placeholder="验证码" 
+              size="large"
+            />
             <CheckCode ref="checkCodeRef" />
           </div>
         </el-form-item>
+        
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="handleLogin" style="width: 100%">登录</el-button>
+          <el-button 
+            class="login-btn" 
+            :loading="loading" 
+            @click="handleLogin"
+          >
+            登录
+          </el-button>
         </el-form-item>
       </el-form>
-      <div class="footer">
-        还没有账号？<router-link to="/register">立即注册</router-link>
+      
+      <!-- Footer -->
+      <div class="login-footer">
+        <span>还没有账号？</span>
+        <router-link to="/register" class="register-link">立即注册</router-link>
       </div>
     </div>
   </div>
@@ -30,6 +64,7 @@
 import { ref, reactive } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
+import { Message, Lock } from '@element-plus/icons-vue'
 import CheckCode from '@/components/CheckCode.vue'
 import { useUserStore } from '@/stores/user'
 
@@ -79,40 +114,107 @@ async function handleLogin() {
 </script>
 
 <style scoped>
-.login-container {
+.login-page {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--color-bg-light);
 }
-.login-box {
+
+.login-card {
   width: 400px;
-  padding: 40px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  padding: var(--spacing-2xl);
+  background: var(--color-bg-white);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
 }
-.login-box h2 {
-  text-align: center;
-  margin-bottom: 30px;
-  color: #333;
+
+.login-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-2xl);
 }
+
+.logo-mark {
+  width: 40px;
+  height: 40px;
+  background: var(--color-primary);
+  color: var(--color-text-white);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+}
+
+.logo-text {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.login-form {
+  margin-bottom: var(--spacing-md);
+}
+
+.login-form :deep(.el-input__wrapper) {
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 1px var(--color-border) inset;
+}
+
+.login-form :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px var(--color-secondary) inset;
+}
+
+.login-form :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--color-primary) inset;
+}
+
 .check-code-row {
   display: flex;
-  gap: 12px;
+  gap: var(--spacing-sm);
   width: 100%;
 }
+
 .check-code-row .el-input {
   flex: 1;
 }
-.footer {
-  text-align: center;
-  margin-top: 20px;
-  color: #666;
+
+.login-btn {
+  width: 100%;
+  height: 44px;
+  background: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--color-text-white);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast);
 }
-.footer a {
-  color: #409eff;
-  text-decoration: none;
+
+.login-btn:hover {
+  background: var(--color-secondary);
+}
+
+.login-footer {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.register-link {
+  color: var(--color-accent);
+  font-weight: 500;
+  margin-left: var(--spacing-xs);
+  transition: color var(--transition-fast);
+}
+
+.register-link:hover {
+  color: var(--color-primary);
 }
 </style>
