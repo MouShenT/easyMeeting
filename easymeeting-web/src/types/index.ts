@@ -170,3 +170,58 @@ export interface WebSocketMessage<T = any> {
   fileType?: number
   fileSize?: number
 }
+
+
+// 联系人相关类型
+export interface UserContactVo {
+  userId: string
+  contactId: string
+  contactNickName: string
+  sex: number
+  status: number
+  lastUpdateTime: string
+  lastLoginTime: number | null
+  lastOffTime: number | null
+  online: boolean
+}
+
+export interface UserContactApplyVo {
+  applyId: number
+  applyUserId: string
+  applyUserNickName: string
+  receiveUserId: string
+  receiveUserNickName: string
+  lastApplyTime: string
+  status: number
+}
+
+export interface UserInfoVoForSearch {
+  userId: string
+  nickName: string
+  status: number
+}
+
+// 联系人搜索状态枚举
+export enum ContactSearchStatus {
+  SELF = -1,
+  NOT_FRIEND = 0,
+  FRIEND = 1,
+  PENDING = 2,
+  BLACKLISTED = 3,
+  BE_FRIEND = 4
+}
+
+// 好友申请状态枚举
+export enum ApplyStatus {
+  INIT = 0,
+  PASS = 1,
+  REJECT = 2,
+  BLACKLIST = 3
+}
+
+// 会议邀请消息内容
+export interface MeetingInviteContent {
+  meetingId: string
+  meetingName: string
+  inviteUserName: string
+}

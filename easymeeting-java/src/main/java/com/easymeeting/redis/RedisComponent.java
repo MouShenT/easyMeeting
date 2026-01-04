@@ -117,6 +117,43 @@ public class RedisComponent {
     public boolean hasToken(String token) {
         return redisUtils.hasKey(Constants.REDIS_KEY_TOKEN + token);
     }
+    
+    /**
+     * Token 自动续期
+     * 当 Token 剩余有效期小于阈值时，自动延长有效期
+     * @param token Token
+     * @param renewThresholdSeconds 续期阈值（秒），剩余时间小于此值时触发续期
+     * @return true 表示已续期，false 表示未续期
+     */
+    public boolean renewTokenIfNeeded(String token, long renewThresholdSeconds) {
+        String tokenKey = Constants.REDIS_KEY_TOKEN + token;
+        Long ttl = redisUtils.getExpire(tokenKey);
+        
+        if (ttl == null || ttl <= 0) {
+            return false;
+        }
+        
+        // 如果剩余时间小于阈值，则续期
+        if (ttl < renewThresholdSeconds) {
+            TokenUserInfoDto userInfo = getTokenUserInfo(token);
+            if (userInfo != null) {
+                // 续期 token -> UserInfo
+                redisUtils.expire(tokenKey, Constants.REDIS_EXPIRE_TOKEN, TimeUnit.SECONDS);
+                // 续期 userId -> token
+                redisUtils.expire(Constants.REDIS_KEY_USER_TOKEN + userInfo.getUserId(), 
+                        Constants.REDIS_EXPIRE_TOKEN, TimeUnit.SECONDS);
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * 获取 Token 剩余有效期（秒）
+     */
+    public Long getTokenTTL(String token) {
+        return redisUtils.getExpire(Constants.REDIS_KEY_TOKEN + token);
+    }
     public void addToMeeting(String meetingId, MeetingMemberDto meetingMemberDto) {
         redisUtils.hSet(Constants.REDIS_KEY_MEETING_ROOM+meetingId, meetingMemberDto.getUserId(), meetingMemberDto);
     }
@@ -158,5 +195,33 @@ public class RedisComponent {
         // 从会议成员列表中移除该用户
         removeMeetingMember(meetingId, userId);
         return true;
+    }
+    /**
+     * 添加会议邀请信息
+     * @param meetingId 会议ID
+     * @param userId 被邀请用户ID
+     */
+    public void addInviteInfo(String meetingId, String userId) {
+        redisUtils.set(Constants.REDIS_KEY_MEETING_INVITE + userId + ":" + meetingId, 
+                meetingId, Constants.REDIS_EXPIRE_INVITE, TimeUnit.SECONDS);
+    }
+
+    /**
+     * 获取会议邀请信息
+     * @param meetingId 会议ID
+     * @param userId 被邀请用户ID
+     * @return 会议ID（如果邀请存在）
+     */
+    public String getInviteInfo(String meetingId, String userId) {
+        return (String) redisUtils.get(Constants.REDIS_KEY_MEETING_INVITE + userId + ":" + meetingId);
+    }
+    
+    /**
+     * 删除会议邀请信息（接受邀请后删除）
+     * @param meetingId 会议ID
+     * @param userId 被邀请用户ID
+     */
+    public void removeInviteInfo(String meetingId, String userId) {
+        redisUtils.delete(Constants.REDIS_KEY_MEETING_INVITE + userId + ":" + meetingId);
     }
 }

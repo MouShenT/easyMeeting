@@ -33,6 +33,10 @@ public class Constants {
      * 会议房间 key 前缀
      */
     public static final String REDIS_KEY_MEETING_ROOM = "easymeeting:meeting:room:";
+    /**
+     * 会议房间 key 邀请人前缀
+     */
+    public static final String REDIS_KEY_MEETING_INVITE = "easymeeting:meeting:invite";
     
     // ==================== 过期时间（秒） ====================
     
@@ -40,16 +44,22 @@ public class Constants {
      * 验证码过期时间：5分钟
      */
     public static final int REDIS_EXPIRE_CHECK_CODE = 5 * 60;
+    /**
+     * 邀请失效时间
+     */
+    public static final int REDIS_EXPIRE_INVITE =  3*60;
     
     /**
      * Token 过期时间：7天（秒）
+     * 注意：此值需与 JwtUtils.EXPIRE_TIME 保持一致
      */
-    public static final int REDIS_EXPIRE_TOKEN = 7*24 * 60 * 60;
+    public static final int REDIS_EXPIRE_TOKEN = 7 * 24 * 60 * 60;
     
     /**
-     * Token 过期时间：1天（毫秒）
+     * Token 过期时间：7天（毫秒）
+     * 注意：此值需与 JwtUtils.EXPIRE_TIME 保持一致
      */
-    public static final long REDIS_EXPIRE_TOKEN_MS = (long) 24 * 60 * 60 * 1000;
+    public static final long REDIS_EXPIRE_TOKEN_MS = 7L * 24 * 60 * 60 * 1000;
     
     /**
      * 用户信息缓存过期时间：1小时

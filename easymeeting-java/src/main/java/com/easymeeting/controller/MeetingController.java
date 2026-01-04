@@ -127,20 +127,36 @@ public class MeetingController {
 
     /**
      * 加入会议
+     * 
+     * 安全说明：
+     * 1. 用户必须先通过 preJoinMeeting 验证，才能调用此接口
+     * 2. 用户敏感信息（userId、nickName、sex）从 token 获取，不信任前端传入
+     * 3. meetingId 必须与 token 中的 currentMeetingId 一致，防止绕过 preJoin
      */
     @PostMapping("/joinMeeting")
     public ResponseVO<Void> joinMeeting(@RequestBody JoinMeetingDto joinMeetingDto, HttpServletRequest request) {
         TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
         
-        // 从 token 中获取用户信息，补充到 DTO
+        // 问题3修复：验证用户是否已通过 preJoinMeeting
+        // currentMeetingId 在 preJoinMeeting 中设置，如果为空说明没有通过预验证
+        if (StringUtils.isEmpty(tokenUserInfoDto.getCurrentMeetingId())) {
+            throw new BusinessException("请先通过会议号加入会议");
+        }
+        
+        // 问题3修复：验证 meetingId 与 token 中记录的一致（防止绕过 preJoin）
+        String requestMeetingId = joinMeetingDto.getMeetingId();
+        if (StringUtils.isNotEmpty(requestMeetingId) 
+                && !requestMeetingId.equals(tokenUserInfoDto.getCurrentMeetingId())) {
+            throw new BusinessException("会议ID不匹配，请重新加入会议");
+        }
+        
+        // 问题2修复：从 token 获取用户信息，不信任前端传入
+        // 这样即使前端伪造 userId 也无效
         joinMeetingDto.setUserId(tokenUserInfoDto.getUserId());
         joinMeetingDto.setNickName(tokenUserInfoDto.getNickName());
         joinMeetingDto.setSex(tokenUserInfoDto.getSex());
+        joinMeetingDto.setMeetingId(tokenUserInfoDto.getCurrentMeetingId());
         
-        // 如果前端没传 meetingId，使用 token 中的 currentMeetingId
-        if (StringUtils.isEmpty(joinMeetingDto.getMeetingId())) {
-            joinMeetingDto.setMeetingId(tokenUserInfoDto.getCurrentMeetingId());
-        }
         meetingInfoService.joinMeeting(joinMeetingDto);
         return ResponseVO.success();
     }
@@ -223,6 +239,39 @@ public class MeetingController {
         meetingInfoService.reserveJoinMeeting(meetingId,tokenUserInfoDto,password);
         return ResponseVO.success(null);
     }
+    /**
+     * 邀请联系人加入会议
+     * 
+     * 邀请者必须在会议中，被邀请者必须是邀请者的好友
+     * 邀请信息会保存到 Redis，有效期 3 分钟
+     */
+    @PostMapping("/inviteContactToMeeting")
+    public ResponseVO<Void> inviteContactToMeeting(@RequestBody List<String> contactsId, HttpServletRequest request) {
+        if (contactsId == null || contactsId.isEmpty()) {
+            throw new BusinessException("邀请列表不能为空");
+        }
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        meetingInfoService.inviteContact(tokenUserInfoDto, contactsId);
+        return ResponseVO.success();
+    }
+    
+    /**
+     * 接受会议邀请
+     * 
+     * 被邀请用户接受邀请后，不需要输入密码，直接设置 currentMeetingId
+     * 然后前端跳转到会议页面，调用 joinMeeting 正式加入
+     * 
+     * @param meetingId 会议ID
+     * @return 会议ID（供前端跳转使用）
+     */
+    @PostMapping("/acceptInvite")
+    public ResponseVO<String> acceptInvite(@RequestParam @NotEmpty String meetingId, HttpServletRequest request) {
+        TokenUserInfoDto tokenUserInfoDto = (TokenUserInfoDto) request.getAttribute(TokenInterceptor.CURRENT_USER);
+        meetingInfoService.acceptInvite(tokenUserInfoDto, meetingId);
+        // 返回 meetingId，前端可以用来跳转到会议页面
+        return ResponseVO.success(meetingId);
+    }
+
 
 
 

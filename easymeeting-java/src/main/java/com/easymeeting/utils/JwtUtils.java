@@ -13,8 +13,8 @@ public class JwtUtils {
     private static final String SECRET = "easymeeting-jwt-secret-key-2024-must-be-at-least-256-bits";
     private static final SecretKey KEY = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
     
-    // Token有效期：1天
-    private static final long EXPIRE_TIME = 24 * 60 * 60 * 1000L;
+    // Token有效期：7天（与 Redis 会话保持一致）
+    private static final long EXPIRE_TIME = 7 * 24 * 60 * 60 * 1000L;
 
     /**
      * 生成JWT Token

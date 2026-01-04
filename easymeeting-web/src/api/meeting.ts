@@ -68,3 +68,15 @@ export function reserveJoinMeeting(meetingId: string, nickName: string, password
     params: { meetingId, nickName, password }
   })
 }
+
+// 邀请联系人加入会议
+export function inviteContactToMeeting(contactIds: string[]): Promise<void> {
+  return request.post('/meeting/inviteContactToMeeting', contactIds)
+}
+
+// 接受会议邀请（返回 meetingId）
+export function acceptInvite(meetingId: string): Promise<string> {
+  return request.post('/meeting/acceptInvite', null, {
+    params: { meetingId }
+  })
+}

@@ -159,6 +159,34 @@ public class ChannelContextUtils {
         return USER_CONTEXT_MAP.size();
     }
 
+    /**
+     * 检查用户是否在线
+     */
+    public boolean isUserOnline(String userId) {
+        Channel channel = USER_CONTEXT_MAP.get(userId);
+        return channel != null && channel.isActive();
+    }
+
+    /**
+     * 批量检查用户在线状态
+     * @param userIds 用户ID列表
+     * @return Map<userId, isOnline>
+     */
+    public java.util.Map<String, Boolean> checkUsersOnline(java.util.List<String> userIds) {
+        java.util.Map<String, Boolean> result = new java.util.HashMap<>();
+        for (String userId : userIds) {
+            result.put(userId, isUserOnline(userId));
+        }
+        return result;
+    }
+
+    /**
+     * 获取所有在线用户ID
+     */
+    public java.util.Set<String> getOnlineUserIds() {
+        return new java.util.HashSet<>(USER_CONTEXT_MAP.keySet());
+    }
+
     // ==================== 会议房间相关 ====================
 
     /**

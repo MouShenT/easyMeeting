@@ -3,7 +3,9 @@ package com.easymeeting.service;
 import com.easymeeting.dto.JoinMeetingDto;
 import com.easymeeting.dto.TokenUserInfoDto;
 import com.easymeeting.entity.MeetingInfo;
+import com.easymeeting.entity.UserContact;
 import com.easymeeting.enums.MeetingMemberStatusEnum;
+import com.easymeeting.interceptor.TokenInterceptor;
 import com.easymeeting.vo.PageResult;
 import java.util.List;
 
@@ -46,4 +48,6 @@ public interface MeetingInfoService {
     void forceExitMeetingRoom(TokenUserInfoDto tokenUserInfoDto, String userId,MeetingMemberStatusEnum meetingMemberStatusEnum);
     void finishMeeting(String meetingId,String userId);
     void reserveJoinMeeting(String meetingId,TokenUserInfoDto tokenUserInfoDto,String password);
+    void inviteContact(TokenUserInfoDto tokenUserInfoDto, List<String> contactsId);
+    void acceptInvite(TokenUserInfoDto tokenUserInfoDto, String meetingId);
 }

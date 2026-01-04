@@ -65,6 +65,10 @@
         <el-icon :size="24"><User /></el-icon>
         <span>成员 ({{ members.length }})</span>
       </div>
+      <div class="control-item" @click="showInvite = true">
+        <el-icon :size="24"><Plus /></el-icon>
+        <span>邀请</span>
+      </div>
       <div class="control-item" @click="showChat = !showChat">
         <el-icon :size="24"><ChatDotRound /></el-icon>
         <span>聊天</span>
@@ -98,26 +102,80 @@
         @send="sendChatMessage"
       />
     </el-drawer>
+
+    <!-- 邀请联系人对话框 -->
+    <el-dialog v-model="showInvite" title="邀请联系人" width="450px" :close-on-click-modal="false">
+      <div class="invite-dialog">
+        <el-input 
+          v-model="inviteSearchKeyword" 
+          placeholder="搜索联系人" 
+          clearable
+          class="invite-search"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        
+        <div class="contact-list" v-loading="contactsLoading">
+          <div 
+            v-for="contact in filteredContacts" 
+            :key="contact.contactId"
+            class="contact-item"
+            :class="{ 'is-selected': selectedContacts.includes(contact.contactId) }"
+            @click="toggleContactSelection(contact.contactId)"
+          >
+            <div class="contact-avatar">{{ contact.contactNickName.charAt(0) }}</div>
+            <div class="contact-info">
+              <span class="contact-name">{{ contact.contactNickName }}</span>
+              <span class="contact-status" :class="{ 'is-online': contact.online }">
+                {{ contact.online ? '在线' : '离线' }}
+              </span>
+            </div>
+            <el-icon v-if="selectedContacts.includes(contact.contactId)" class="check-icon">
+              <Check />
+            </el-icon>
+          </div>
+          <el-empty v-if="filteredContacts.length === 0 && !contactsLoading" description="暂无联系人" />
+        </div>
+      </div>
+      <template #footer>
+        <span class="selected-count" v-if="selectedContacts.length > 0">
+          已选择 {{ selectedContacts.length }} 人
+        </span>
+        <el-button @click="showInvite = false">取消</el-button>
+        <el-button 
+          type="primary" 
+          :loading="inviteLoading" 
+          :disabled="selectedContacts.length === 0"
+          @click="confirmInvite"
+        >
+          发送邀请
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   Clock, VideoCamera, VideoCameraFilled, Microphone, Mute,
-  User, ChatDotRound, SwitchButton, ArrowLeft, CircleClose 
+  User, ChatDotRound, SwitchButton, ArrowLeft, CircleClose, Plus, Search, Check 
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { wsService, MessageType, MessageSendToType, MemberType, MemberStatus } from '@/utils/websocket'
 import type { WebSocketMessage, MeetingMember, MeetingJoinContent, MeetingExitContent } from '@/utils/websocket'
 import { webRTCManager } from '@/utils/webrtc'
-import { kickOutMember, blacklistMember, finishMeeting, getCurrentMeeting, exitMeeting } from '@/api/meeting'
+import { kickOutMember, blacklistMember, finishMeeting, getCurrentMeeting, exitMeeting, inviteContactToMeeting } from '@/api/meeting'
+import { loadContactUser } from '@/api/contact'
 import MemberList from '@/components/MemberList.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import type { ChatMessage } from '@/components/ChatPanel.vue'
+import type { UserContactVo } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -150,6 +208,75 @@ const localAudioOpen = ref(true)
 // UI 状态
 const showMembers = ref(false)
 const showChat = ref(false)
+const showInvite = ref(false)
+
+// 邀请相关状态
+const contacts = ref<UserContactVo[]>([])
+const contactsLoading = ref(false)
+const selectedContacts = ref<string[]>([])
+const inviteSearchKeyword = ref('')
+const inviteLoading = ref(false)
+
+// 过滤后的联系人列表
+const filteredContacts = computed(() => {
+  if (!inviteSearchKeyword.value) {
+    return contacts.value
+  }
+  const keyword = inviteSearchKeyword.value.toLowerCase()
+  return contacts.value.filter(c => 
+    c.contactNickName.toLowerCase().includes(keyword)
+  )
+})
+
+// 监听邀请对话框打开，加载联系人列表
+watch(showInvite, async (newVal) => {
+  if (newVal) {
+    // 重置状态
+    selectedContacts.value = []
+    inviteSearchKeyword.value = ''
+    
+    // 加载联系人列表
+    contactsLoading.value = true
+    try {
+      contacts.value = await loadContactUser()
+    } catch (error) {
+      console.error('加载联系人失败:', error)
+      ElMessage.error('加载联系人失败')
+    } finally {
+      contactsLoading.value = false
+    }
+  }
+})
+
+// 切换联系人选择状态
+function toggleContactSelection(contactId: string) {
+  const index = selectedContacts.value.indexOf(contactId)
+  if (index === -1) {
+    selectedContacts.value.push(contactId)
+  } else {
+    selectedContacts.value.splice(index, 1)
+  }
+}
+
+// 确认邀请
+async function confirmInvite() {
+  if (selectedContacts.value.length === 0) {
+    ElMessage.warning('请选择要邀请的联系人')
+    return
+  }
+  
+  inviteLoading.value = true
+  try {
+    await inviteContactToMeeting(selectedContacts.value)
+    ElMessage.success(`已向 ${selectedContacts.value.length} 位联系人发送邀请`)
+    showInvite.value = false
+  } catch (error: any) {
+    console.error('发送邀请失败:', error)
+    ElMessage.error(error.message || '发送邀请失败')
+  } finally {
+    inviteLoading.value = false
+  }
+}
 
 // 聊天消息
 const chatMessages = ref<ChatMessage[]>([])
@@ -372,7 +499,8 @@ async function handleLeaveMeeting() {
 // 清理资源
 function cleanup() {
   webRTCManager.cleanup()
-  wsService.disconnect()
+  // 注意：不要断开 WebSocket 连接，因为是全局共享的
+  // wsService.disconnect()
   if (durationTimer) {
     clearInterval(durationTimer)
     durationTimer = null
@@ -936,5 +1064,98 @@ onUnmounted(() => {
 
 :deep(.el-drawer__close-btn:hover) {
   color: var(--color-text-primary);
+}
+
+/* 邀请对话框样式 */
+.invite-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.invite-search {
+  margin-bottom: var(--spacing-sm);
+}
+
+.contact-list {
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.contact-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.contact-item:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.contact-item.is-selected {
+  background-color: rgba(212, 175, 55, 0.1);
+  border-color: var(--color-accent);
+}
+
+.contact-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--color-accent) 0%, #b8962e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: #0a0a0a;
+  flex-shrink: 0;
+}
+
+.contact-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contact-name {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.contact-status {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.contact-status.is-online {
+  color: var(--color-success);
+}
+
+.check-icon {
+  color: var(--color-accent);
+  font-size: 18px;
+}
+
+:deep(.el-dialog__footer) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
+}
+
+.selected-count {
+  margin-right: auto;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
 </style>
