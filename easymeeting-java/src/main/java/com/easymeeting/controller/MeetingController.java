@@ -3,6 +3,7 @@ package com.easymeeting.controller;
 import com.easymeeting.dto.JoinMeetingDto;
 import com.easymeeting.dto.MeetingCreateDto;
 import com.easymeeting.dto.TokenUserInfoDto;
+
 import com.easymeeting.entity.MeetingInfo;
 import com.easymeeting.entity.MeetingMember;
 import com.easymeeting.enums.MeetingMemberStatusEnum;
@@ -10,6 +11,7 @@ import com.easymeeting.enums.MeetingStatusEnum;
 import com.easymeeting.exception.BusinessException;
 import com.easymeeting.interceptor.TokenInterceptor;
 import com.easymeeting.redis.RedisComponent;
+import com.easymeeting.service.ChatMessageService;
 import com.easymeeting.service.MeetingInfoService;
 import com.easymeeting.service.impl.MeetingMemberServiceImpl;
 import com.easymeeting.utils.StringUtils;
@@ -37,6 +39,7 @@ public class MeetingController {
     private final MeetingInfoService meetingInfoService;
     private final RedisComponent redisComponent;
     private final MeetingMemberServiceImpl meetingMemberServiceImpl;
+
 
     /**
      * 加载所有历史会议（我创建的 + 我参加的）
@@ -271,6 +274,8 @@ public class MeetingController {
         // 返回 meetingId，前端可以用来跳转到会议页面
         return ResponseVO.success(meetingId);
     }
+
+
 
 
 

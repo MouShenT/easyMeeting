@@ -1,5 +1,6 @@
 package com.easymeeting.service.impl;
 
+import com.easymeeting.entity.PrivateChatUnread;
 import com.easymeeting.entity.UserContact;
 import com.easymeeting.entity.UserContactApply;
 import com.easymeeting.entity.UserInfo;
@@ -7,6 +8,7 @@ import com.easymeeting.enums.ContactSearchStatusEnum;
 import com.easymeeting.enums.UserContactApplyStatusEnum;
 import com.easymeeting.enums.UserContactStatusEnum;
 import com.easymeeting.exception.BusinessException;
+import com.easymeeting.mapper.PrivateChatUnreadMapper;
 import com.easymeeting.mapper.UserContactApplyMapper;
 import com.easymeeting.mapper.UserContactMapper;
 import com.easymeeting.mapper.UserMapper;
@@ -19,6 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -29,6 +33,7 @@ public class UserContactServiceImpl implements UserContactService {
     private final UserMapper userMapper;
     private final UserContactApplyMapper userContactApplyMapper;
     private final ChannelContextUtils channelContextUtils;
+    private final PrivateChatUnreadMapper privateChatUnreadMapper;
 
     @Override
     public UserContact addContact(UserContact userContact) {
@@ -185,10 +190,27 @@ public class UserContactServiceImpl implements UserContactService {
     @Override
     public List<UserContactVo> getNormalContactsWithNickName(String userId) {
         List<UserContactVo> contacts = userContactMapper.selectNormalContactsWithNickName(userId);
-        // 设置实时在线状态（通过 WebSocket 连接判断）
+        
+        // 批量设置实时在线状态（优化：一次性获取所有在线用户ID）
+        java.util.Set<String> onlineUserIds = channelContextUtils.getOnlineUserIds();
+        
+        // 获取所有未读消息记录
+        List<PrivateChatUnread> unreadList = privateChatUnreadMapper.selectByUserId(userId);
+        Map<String, PrivateChatUnread> unreadMap = unreadList.stream()
+                .collect(Collectors.toMap(PrivateChatUnread::getContactId, u -> u, (a, b) -> a));
+        
         for (UserContactVo contact : contacts) {
-            boolean isOnline = channelContextUtils.getChannel(contact.getContactId()) != null;
-            contact.setOnline(isOnline);
+            contact.setOnline(onlineUserIds.contains(contact.getContactId()));
+            
+            // 设置未读消息信息
+            PrivateChatUnread unread = unreadMap.get(contact.getContactId());
+            if (unread != null) {
+                contact.setUnreadCount(unread.getUnreadCount());
+                contact.setLastMessageTime(unread.getLastMessageTime());
+                contact.setLastMessageContent(unread.getLastMessageContent());
+            } else {
+                contact.setUnreadCount(0);
+            }
         }
         return contacts;
     }

@@ -123,12 +123,20 @@ const joinMeetingForm = reactive<JoinMeetingForm>({
   videoOpen: true
 })
 
-// Load current meeting
+// Load current meeting (使用缓存避免重复请求)
+let currentMeetingPromise: Promise<MeetingInfo | null> | null = null
+
 async function loadCurrentMeeting() {
   try {
-    currentMeeting.value = await getCurrentMeeting()
+    // 如果已有请求在进行中，复用它
+    if (!currentMeetingPromise) {
+      currentMeetingPromise = getCurrentMeeting()
+    }
+    currentMeeting.value = await currentMeetingPromise
   } catch (error) {
     console.error('获取当前会议失败:', error)
+  } finally {
+    currentMeetingPromise = null
   }
 }
 

@@ -95,11 +95,16 @@
     </el-drawer>
 
     <!-- 聊天侧边栏 -->
-    <el-drawer v-model="showChat" title="会议聊天" direction="rtl" size="380px">
+    <el-drawer v-model="showChat" title="会议聊天" direction="rtl" size="380px" @open="loadChatHistory">
       <ChatPanel 
         :messages="chatMessages"
         :current-user-id="userStore.userId"
+        :loading="chatLoading"
+        :has-more="chatHasMore"
+        :show-private-select="true"
+        :members="members"
         @send="sendChatMessage"
+        @load-more="loadMoreChatHistory"
       />
     </el-drawer>
 
@@ -172,6 +177,8 @@ import type { WebSocketMessage, MeetingMember, MeetingJoinContent, MeetingExitCo
 import { webRTCManager } from '@/utils/webrtc'
 import { kickOutMember, blacklistMember, finishMeeting, getCurrentMeeting, exitMeeting, inviteContactToMeeting } from '@/api/meeting'
 import { loadContactUser } from '@/api/contact'
+import { loadMeetingMessages, loadMoreMeetingMessages, sendMeetingMessage } from '@/api/chat'
+import type { ChatMessage as ApiChatMessage } from '@/api/chat'
 import MemberList from '@/components/MemberList.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import type { ChatMessage } from '@/components/ChatPanel.vue'
@@ -280,6 +287,9 @@ async function confirmInvite() {
 
 // 聊天消息
 const chatMessages = ref<ChatMessage[]>([])
+const chatLoading = ref(false)
+const chatHasMore = ref(true)
+const chatMinMessageId = ref<number | null>(null)
 
 // 是否是创建者
 const isCreator = computed(() => userStore.userId === creatorId.value)
@@ -391,23 +401,93 @@ function toggleAudio() {
 }
 
 // 发送聊天消息
-function sendChatMessage(content: string) {
-  wsService.send({
-    messageSendToType: MessageSendToType.GROUP,
-    meetingId: meetingId.value,
-    messageType: MessageType.CHAT_TEXT_MESSAGE,
-    sendUserId: userStore.userId,
-    sendUserNickName: userStore.nickName,
-    messageContent: content,
-    sendTime: Date.now()
-  })
+async function sendChatMessage(content: string, receiveUserId?: string) {
+  const receiveId = receiveUserId || '0'  // "0" 表示群发
+  const receiveType = receiveUserId ? 1 : 0
   
+  // 本地添加消息（立即显示）
   chatMessages.value.push({
     sendUserId: userStore.userId,
     sendUserNickName: userStore.nickName,
     content: content,
-    sendTime: Date.now()
+    messageContent: content,
+    sendTime: Date.now(),
+    receiveType: receiveType,
+    receiveUserId: receiveId
   })
+  
+  // 只通过 HTTP API 发送消息（后端会保存并通过 WebSocket 推送给其他人）
+  // 不再通过 WebSocket 直接发送，避免消息重复
+  try {
+    await sendMeetingMessage(content, MessageType.CHAT_TEXT_MESSAGE, receiveId)
+  } catch (error) {
+    console.error('发送消息失败:', error)
+  }
+}
+
+// 加载聊天历史消息
+async function loadChatHistory() {
+  console.log('loadChatHistory 被调用, chatLoading:', chatLoading.value)
+  if (chatLoading.value) {
+    console.log('chatLoading 为 true，跳过加载')
+    return
+  }
+  
+  chatLoading.value = true
+  try {
+    console.log('开始调用 loadMeetingMessages API...')
+    const result = await loadMeetingMessages(1, 20)
+    console.log('loadMeetingMessages 返回结果:', result)
+    if (result.list && result.list.length > 0) {
+      chatMessages.value = result.list.map(convertApiMessage).reverse()
+      chatMinMessageId.value = Math.min(...result.list.map(m => m.messageId))
+      chatHasMore.value = result.list.length >= 20
+      console.log('聊天消息已加载，数量:', chatMessages.value.length)
+    } else {
+      chatHasMore.value = false
+      console.log('没有聊天消息')
+    }
+  } catch (error) {
+    console.error('加载聊天历史失败:', error)
+  } finally {
+    chatLoading.value = false
+  }
+}
+
+// 加载更多历史消息
+async function loadMoreChatHistory() {
+  if (chatLoading.value || !chatHasMore.value || !chatMinMessageId.value) return
+  
+  chatLoading.value = true
+  try {
+    const result = await loadMoreMeetingMessages(chatMinMessageId.value, 20)
+    if (result.list && result.list.length > 0) {
+      const newMessages = result.list.map(convertApiMessage).reverse()
+      chatMessages.value = [...newMessages, ...chatMessages.value]
+      chatMinMessageId.value = Math.min(...result.list.map(m => m.messageId))
+      chatHasMore.value = result.list.length >= 20
+    } else {
+      chatHasMore.value = false
+    }
+  } catch (error) {
+    console.error('加载更多消息失败:', error)
+  } finally {
+    chatLoading.value = false
+  }
+}
+
+// 转换 API 消息格式
+function convertApiMessage(msg: ApiChatMessage): ChatMessage {
+  return {
+    messageId: msg.messageId,
+    sendUserId: msg.sendUserId,
+    sendUserNickName: msg.sendUserNickName,
+    content: msg.messageContent,
+    messageContent: msg.messageContent,
+    sendTime: msg.sendTime,
+    receiveType: msg.receiveType,
+    receiveUserId: msg.receiveUserId
+  }
 }
 
 // 踢出成员
@@ -564,6 +644,10 @@ function handleMemberJoin(message: WebSocketMessage<MeetingJoinContent>) {
       console.log('Total members:', members.value.length)
       console.log('Current connections:', webRTCManager.getConnectionCount())
       
+      // 新策略：双向发起连接
+      // 1. 新成员向所有现有成员发起连接
+      // 2. 现有成员也向新成员发起连接
+      // 这样无论谁先准备好都能建立连接，避免时序问题
       members.value.forEach(member => {
         if (member.userId !== userStore.userId) {
           const hasConnection = webRTCManager.hasConnection(member.userId)
@@ -573,11 +657,30 @@ function handleMemberJoin(message: WebSocketMessage<MeetingJoinContent>) {
           if (!hasConnection) {
             if (iAmNewMember) {
               // 我是新加入的，主动向所有现有成员发起连接
-              console.log('I am new member, initiating connection to:', member.userId)
-              webRTCManager.initiateConnection(member.userId)
+              // 添加小延迟，确保对方有时间处理 ADD_MEETING_ROOM 消息
+              console.log('I am new member, will initiate connection to:', member.userId)
+              setTimeout(() => {
+                // 再次检查是否已有连接（可能对方已经先发起了）
+                if (!webRTCManager.hasConnection(member.userId)) {
+                  console.log('Initiating delayed connection to:', member.userId)
+                  webRTCManager.initiateConnection(member.userId)
+                } else {
+                  console.log('Connection already exists with:', member.userId)
+                }
+              }, 800)
             } else if (content.newMember && content.newMember.userId === member.userId) {
-              // 有新成员加入，等待新成员向我发起连接
-              console.log('New member joined:', member.userId, '- waiting for them to initiate')
+              // 有新成员加入，现有成员也主动向新成员发起连接
+              // 这样双方都会尝试建立连接，谁先成功就用谁的
+              console.log('New member joined:', member.userId, '- I will also initiate connection')
+              setTimeout(() => {
+                // 检查是否已有连接（可能新成员已经先发起了）
+                if (!webRTCManager.hasConnection(member.userId)) {
+                  console.log('Existing member initiating connection to new member:', member.userId)
+                  webRTCManager.initiateConnection(member.userId)
+                } else {
+                  console.log('Connection already exists with new member:', member.userId)
+                }
+              }, 1500) // 增加延迟到 1.5 秒，给新成员更多时间初始化本地媒体
             } else {
               // 既不是我新加入，也不是对方新加入，使用 userId 比较决定谁发起
               // 这种情况可能发生在网络重连或其他边缘情况
@@ -643,12 +746,25 @@ function handleVideoChange(message: WebSocketMessage) {
 }
 
 function handleChatMessage(message: WebSocketMessage) {
+  // 只处理其他人发送的消息（自己发送的已经在本地添加了）
   if (message.sendUserId !== userStore.userId) {
+    // 检查是否是私聊消息
+    const receiveType = (message.messageContent as any)?.receiveType || 0
+    const receiveUserId = (message as any).receiveUserId || '0'
+    
+    // 如果是私聊消息，只有目标用户才能看到
+    if (receiveType === 1 && receiveUserId !== userStore.userId) {
+      return
+    }
+    
     chatMessages.value.push({
       sendUserId: message.sendUserId || '',
       sendUserNickName: message.sendUserNickName || '',
       content: message.messageContent as string,
-      sendTime: message.sendTime || Date.now()
+      messageContent: message.messageContent as string,
+      sendTime: message.sendTime || Date.now(),
+      receiveType: receiveType,
+      receiveUserId: receiveUserId
     })
   }
 }
@@ -722,14 +838,7 @@ onMounted(async () => {
   // 初始化 WebRTC 管理器
   webRTCManager.init(meetingId.value, userStore.userId, onRemoteStream, onStreamRemoved)
 
-  // 注册 WebSocket 消息处理器
-  wsService.on(MessageType.ADD_MEETING_ROOM, handleMemberJoin)
-  wsService.on(MessageType.EXIT_MEETING_ROOM, handleMemberExit)
-  wsService.on(MessageType.MEETING_USER_VIDEO_CHANGE, handleVideoChange)
-  wsService.on(MessageType.CHAT_TEXT_MESSAGE, handleChatMessage)
-  wsService.on(MessageType.FINISH_MEETING, handleMeetingEnd)
-
-  // 初始化本地媒体
+  // 【重要】先初始化本地媒体，确保在收到成员列表消息前 localStream 已准备好
   await initLocalMedia()
 
   // 先添加自己到成员列表
@@ -743,19 +852,61 @@ onMounted(async () => {
     sex: userStore.sex
   }]
 
-  // 连接 WebSocket
-  try {
-    await wsService.connect()
-    ElMessage.success('已连接到会议服务器')
-  } catch (error) {
-    console.error('Failed to connect WebSocket:', error)
-    ElMessage.error('连接会议服务器失败，请检查网络连接')
+  // 【重要】在本地媒体准备好之后再注册 WebSocket 消息处理器
+  // 这样当收到 ADD_MEETING_ROOM 消息时，localStream 已经可用
+  wsService.on(MessageType.ADD_MEETING_ROOM, handleMemberJoin)
+  wsService.on(MessageType.EXIT_MEETING_ROOM, handleMemberExit)
+  wsService.on(MessageType.MEETING_USER_VIDEO_CHANGE, handleVideoChange)
+  wsService.on(MessageType.CHAT_TEXT_MESSAGE, handleChatMessage)
+  wsService.on(MessageType.FINISH_MEETING, handleMeetingEnd)
+
+  // 等待 WebSocket 连接就绪（App.vue 负责全局连接）
+  // 不再在这里调用 connect()，避免重复连接导致用户重复加入会议房间
+  if (!wsService.isConnected) {
+    console.log('等待 WebSocket 连接就绪...')
+    // 等待最多 5 秒
+    let waitTime = 0
+    const maxWaitTime = 5000
+    const checkInterval = 100
+    while (!wsService.isConnected && waitTime < maxWaitTime) {
+      await new Promise(resolve => setTimeout(resolve, checkInterval))
+      waitTime += checkInterval
+    }
+    
+    if (!wsService.isConnected) {
+      console.error('WebSocket 连接超时')
+      ElMessage.error('连接会议服务器失败，请刷新页面重试')
+      return
+    }
   }
+  console.log('WebSocket 已连接，复用现有连接')
+  
+  // 【关键修复】无论 WebSocket 是新连接还是已连接，都发送 INIT 消息
+  // 这解决了以下场景：
+  // 1. 页面刷新：WebSocket 已连接，但 handleMemberJoin 还没注册时 ADD_MEETING_ROOM 消息已发送
+  // 2. 离开会议后重新加入：WebSocket 已连接，Channel 上的 currentMeetingId 是旧的
+  // 后端 InitMessageHandler 会从 Redis 获取最新的 currentMeetingId 并发送成员列表
+  console.log('Requesting meeting member list via INIT message...')
+  wsService.send({
+    messageSendToType: MessageSendToType.GROUP,
+    meetingId: meetingId.value,
+    messageType: MessageType.INIT,
+    sendUserId: userStore.userId
+  })
 
   // 开始计时
   durationTimer = window.setInterval(() => {
     duration.value++
   }, 1000)
+  
+  // 预加载聊天历史（解决从主页重新进入会议时聊天记录不显示的问题）
+  console.log('预加载聊天历史...')
+  try {
+    await loadChatHistory()
+    console.log('聊天历史加载完成，消息数量:', chatMessages.value.length)
+  } catch (error) {
+    console.error('预加载聊天历史失败:', error)
+  }
 })
 
 onUnmounted(() => {

@@ -11,12 +11,15 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { useChatStore } from '@/stores/chat'
 import { wsService, MessageType } from '@/utils/websocket'
+import type { WebSocketMessage } from '@/utils/websocket'
 import { acceptInvite, joinMeeting, getCurrentMeeting } from '@/api/meeting'
 import type { MeetingInviteContent } from '@/types'
 
 const router = useRouter()
 const userStore = useUserStore()
+const chatStore = useChatStore()
 
 // 处理会议邀请消息
 async function handleMeetingInvite(message: any) {
@@ -41,6 +44,26 @@ async function handleMeetingInvite(message: any) {
     if (action === 'cancel') {
       ElMessage.info('您可以稍后在消息中查看邀请')
     }
+  }
+}
+
+// 处理私聊消息（全局监听，用于更新未读计数）
+function handlePrivateChatMessage(message: WebSocketMessage) {
+  // 只处理私聊消息（messageSendToType === 0 表示发送给个人）
+  if (message.messageSendToType !== 0) {
+    return
+  }
+  
+  // 只处理其他人发送给我的消息
+  if (message.sendUserId === userStore.userId) {
+    return
+  }
+  
+  console.log('App.vue: 收到私聊消息，更新未读计数', message.sendUserId)
+  
+  // 增加发送者的未读消息计数
+  if (message.sendUserId) {
+    chatStore.incrementUnread(message.sendUserId)
   }
 }
 
@@ -77,9 +100,20 @@ async function handleAcceptInvite(meetingId: string) {
   }
 }
 
+// 防止重复初始化的标志
+let isInitializing = false
+
 // 初始化全局 WebSocket 连接
 async function initGlobalWebSocket() {
   if (!userStore.token) return
+  
+  // 如果已经连接或正在连接，直接返回
+  if (wsService.isConnected || isInitializing) {
+    console.log('WebSocket 已连接或正在连接，跳过初始化')
+    return
+  }
+  
+  isInitializing = true
   
   try {
     // 先验证 token 是否有效（调用任意需要认证的接口）
@@ -90,6 +124,13 @@ async function initGlobalWebSocket() {
     await wsService.connect()
     // 监听会议邀请消息（全局）
     wsService.on(MessageType.INVITE_MESSAGE_MEETING, handleMeetingInvite)
+    // 监听私聊消息（全局，用于更新未读计数）
+    wsService.on(MessageType.CHAT_TEXT_MESSAGE, handlePrivateChatMessage)
+    wsService.on(MessageType.CHAT_MEDIA_MESSAGE, handlePrivateChatMessage)
+    
+    // 加载未读消息计数
+    await chatStore.loadUnreadCounts()
+    
     console.log('全局 WebSocket 连接已建立')
   } catch (error: any) {
     // token 无效或网络错误
@@ -99,6 +140,8 @@ async function initGlobalWebSocket() {
     } else {
       console.error('全局 WebSocket 连接失败:', error)
     }
+  } finally {
+    isInitializing = false
   }
 }
 
@@ -110,7 +153,11 @@ watch(() => userStore.token, (newToken, oldToken) => {
   } else if (!newToken && oldToken) {
     // 用户登出，断开 WebSocket 连接
     wsService.off(MessageType.INVITE_MESSAGE_MEETING, handleMeetingInvite)
+    wsService.off(MessageType.CHAT_TEXT_MESSAGE, handlePrivateChatMessage)
+    wsService.off(MessageType.CHAT_MEDIA_MESSAGE, handlePrivateChatMessage)
     wsService.disconnect()
+    // 重置未读消息计数
+    chatStore.resetAll()
     console.log('全局 WebSocket 连接已断开')
   }
 })
@@ -125,6 +172,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   wsService.off(MessageType.INVITE_MESSAGE_MEETING, handleMeetingInvite)
+  wsService.off(MessageType.CHAT_TEXT_MESSAGE, handlePrivateChatMessage)
+  wsService.off(MessageType.CHAT_MEDIA_MESSAGE, handlePrivateChatMessage)
 })
 </script>
 

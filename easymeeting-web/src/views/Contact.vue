@@ -78,18 +78,22 @@
               v-for="contact in contacts"
               :key="contact.contactId"
               class="contact-item"
+              @click="openChat(contact)"
             >
               <div class="contact-avatar" :class="{ online: contact.online }">
                 {{ contact.contactNickName.charAt(0).toUpperCase() }}
                 <span v-if="contact.online" class="online-dot"></span>
               </div>
               <div class="contact-info">
-                <div class="contact-name">{{ contact.contactNickName }}</div>
+                <div class="contact-name">
+                  {{ contact.contactNickName }}
+                  <el-badge v-if="unreadCounts[contact.contactId]" :value="unreadCounts[contact.contactId]" class="unread-badge" />
+                </div>
                 <div class="contact-status">
                   {{ contact.online ? '在线' : '离线' }}
                 </div>
               </div>
-              <el-dropdown trigger="click" @command="(cmd: string) => handleContactCommand(cmd, contact)">
+              <el-dropdown trigger="click" @command="(cmd: string) => handleContactCommand(cmd, contact)" @click.stop>
                 <el-button
                   :icon="MoreFilled"
                   circle
@@ -99,10 +103,13 @@
                 />
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="delete" :icon="Delete">
+                    <el-dropdown-item command="chat" :icon="ChatDotRound">
+                      发消息
+                    </el-dropdown-item>
+                    <el-dropdown-item command="delete" :icon="Delete" divided>
                       删除好友
                     </el-dropdown-item>
-                    <el-dropdown-item command="blacklist" :icon="CircleClose" divided>
+                    <el-dropdown-item command="blacklist" :icon="CircleClose">
                       拉黑
                     </el-dropdown-item>
                   </el-dropdown-menu>
@@ -170,15 +177,41 @@
         </div>
       </div>
     </div>
+
+    <!-- 私聊对话框 -->
+    <el-dialog 
+      v-model="chatDialogVisible" 
+      :title="'与 ' + (currentChatContact?.contactNickName || '') + ' 聊天'"
+      width="500px"
+      :close-on-click-modal="false"
+      class="chat-dialog"
+    >
+      <div class="private-chat-container">
+        <ChatPanel
+          :messages="privateChatMessages"
+          :current-user-id="userStore.userId"
+          :loading="privateChatLoading"
+          :has-more="privateChatHasMore"
+          @send="sendPrivateChatMessage"
+          @load-more="loadMorePrivateChatHistory"
+        />
+      </div>
+    </el-dialog>
   </AppShell>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Close, Loading, MoreFilled, Delete, CircleClose } from '@element-plus/icons-vue'
+import { Search, Close, Loading, MoreFilled, Delete, CircleClose, ChatDotRound } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import AppShell from '@/components/AppShell.vue'
+import ChatPanel from '@/components/ChatPanel.vue'
+import type { ChatMessage } from '@/components/ChatPanel.vue'
+import { useUserStore } from '@/stores/user'
+import { useChatStore } from '@/stores/chat'
+import { wsService, MessageType } from '@/utils/websocket'
+import type { WebSocketMessage } from '@/utils/websocket'
 import {
   loadContactUser,
   loadContactApply,
@@ -190,7 +223,17 @@ import {
   ApplyStatus,
   ContactStatus
 } from '@/api/contact'
+import {
+  sendPrivateMessage,
+  getPrivateChatHistory,
+  getPrivateMessagesBeforeId,
+  markAsRead
+} from '@/api/chat'
+import type { PrivateChatMessage } from '@/api/chat'
 import type { UserContactVo, UserContactApplyVo, UserInfoVoForSearch } from '@/api/contact'
+
+const userStore = useUserStore()
+const chatStore = useChatStore()
 
 // 搜索相关
 const searchKeyword = ref('')
@@ -209,6 +252,17 @@ const dealingApplyId = ref<string | null>(null)
 
 // 操作联系人
 const operatingContactId = ref<string | null>(null)
+
+// 使用全局 chatStore 的未读消息计数
+const unreadCounts = computed(() => chatStore.unreadCounts)
+
+// 私聊相关
+const chatDialogVisible = ref(false)
+const currentChatContact = ref<UserContactVo | null>(null)
+const privateChatMessages = ref<ChatMessage[]>([])
+const privateChatLoading = ref(false)
+const privateChatHasMore = ref(true)
+const privateChatMinMessageId = ref<number | null>(null)
 
 // 待处理申请数量
 const pendingCount = computed(() => {
@@ -387,13 +441,172 @@ function handleContactCommand(command: string, contact: UserContactVo) {
     handleDeleteContact(contact.contactId, contact.contactNickName)
   } else if (command === 'blacklist') {
     handleBlacklistContact(contact.contactId, contact.contactNickName)
+  } else if (command === 'chat') {
+    openChat(contact)
   }
+}
+
+// 打开私聊对话框
+async function openChat(contact: UserContactVo) {
+  currentChatContact.value = contact
+  privateChatMessages.value = []
+  privateChatHasMore.value = true
+  privateChatMinMessageId.value = null
+  chatDialogVisible.value = true
+  
+  // 加载聊天历史
+  await loadPrivateChatHistory()
+  
+  // 标记已读（使用全局 chatStore）
+  if (chatStore.getUnreadCount(contact.contactId) > 0) {
+    await markAsRead(contact.contactId)
+    chatStore.clearUnread(contact.contactId)
+  }
+}
+
+// 加载私聊历史消息
+async function loadPrivateChatHistory() {
+  if (!currentChatContact.value || privateChatLoading.value) return
+  
+  privateChatLoading.value = true
+  try {
+    const result = await getPrivateChatHistory(currentChatContact.value.contactId, 1, 20)
+    if (result.list && result.list.length > 0) {
+      privateChatMessages.value = result.list.map(convertPrivateMessage).reverse()
+      privateChatMinMessageId.value = Math.min(...result.list.map(m => m.messageId))
+      privateChatHasMore.value = result.list.length >= 20
+    } else {
+      privateChatHasMore.value = false
+    }
+  } catch (error) {
+    console.error('加载私聊历史失败:', error)
+  } finally {
+    privateChatLoading.value = false
+  }
+}
+
+// 加载更多私聊历史消息
+async function loadMorePrivateChatHistory() {
+  if (!currentChatContact.value || privateChatLoading.value || !privateChatHasMore.value || !privateChatMinMessageId.value) return
+  
+  privateChatLoading.value = true
+  try {
+    const result = await getPrivateMessagesBeforeId(currentChatContact.value.contactId, privateChatMinMessageId.value, 20)
+    if (result.list && result.list.length > 0) {
+      const newMessages = result.list.map(convertPrivateMessage).reverse()
+      privateChatMessages.value = [...newMessages, ...privateChatMessages.value]
+      privateChatMinMessageId.value = Math.min(...result.list.map(m => m.messageId))
+      privateChatHasMore.value = result.list.length >= 20
+    } else {
+      privateChatHasMore.value = false
+    }
+  } catch (error) {
+    console.error('加载更多私聊消息失败:', error)
+  } finally {
+    privateChatLoading.value = false
+  }
+}
+
+// 发送私聊消息
+async function sendPrivateChatMessage(content: string) {
+  if (!currentChatContact.value) return
+  
+  // 先本地添加消息
+  const localMessage: ChatMessage = {
+    sendUserId: userStore.userId,
+    sendUserNickName: userStore.nickName,
+    content: content,
+    messageContent: content,
+    sendTime: Date.now()
+  }
+  privateChatMessages.value.push(localMessage)
+  
+  try {
+    // 调用 API 发送消息
+    const result = await sendPrivateMessage(currentChatContact.value.contactId, 5, content)
+    // 更新本地消息的 messageId
+    localMessage.messageId = result.messageId
+  } catch (error) {
+    console.error('发送私聊消息失败:', error)
+    ElMessage.error('发送失败')
+    // 移除发送失败的消息
+    const index = privateChatMessages.value.indexOf(localMessage)
+    if (index > -1) {
+      privateChatMessages.value.splice(index, 1)
+    }
+  }
+}
+
+// 转换私聊消息格式
+function convertPrivateMessage(msg: PrivateChatMessage): ChatMessage {
+  return {
+    messageId: msg.messageId,
+    sendUserId: msg.sendUserId,
+    sendUserNickName: msg.sendUserNickName,
+    content: msg.messageContent,
+    messageContent: msg.messageContent,
+    sendTime: msg.sendTime
+  }
+}
+
+// 处理 WebSocket 私聊消息
+function handlePrivateChatMessage(message: WebSocketMessage) {
+  // 只处理私聊消息（messageSendToType === 0 表示发送给个人）
+  if (message.messageSendToType !== 0) {
+    return
+  }
+  
+  // 只处理其他人发送给我的消息
+  if (message.sendUserId === userStore.userId) {
+    return
+  }
+  
+  console.log('Contact.vue: 收到私聊消息:', message)
+  
+  // 如果当前正在和发送者聊天，添加消息到聊天列表
+  if (chatDialogVisible.value && currentChatContact.value?.contactId === message.sendUserId) {
+    const newMessage: ChatMessage = {
+      messageId: message.messageId,
+      sendUserId: message.sendUserId || '',
+      sendUserNickName: message.sendUserNickName || '',
+      content: message.messageContent as string,
+      messageContent: message.messageContent as string,
+      sendTime: message.sendTime || Date.now()
+    }
+    privateChatMessages.value.push(newMessage)
+    
+    // 标记已读（因为聊天窗口是打开的）
+    markAsRead(message.sendUserId!)
+    // 同时清除 chatStore 中的未读计数（因为 App.vue 可能已经增加了）
+    chatStore.clearUnread(message.sendUserId!)
+  }
+  // 注意：未读计数的增加已由 App.vue 全局处理，这里不需要重复处理
 }
 
 // 初始化
 onMounted(() => {
   loadContacts()
   loadApplies()
+  // 未读消息计数由 App.vue 全局加载，这里不需要重复加载
+  
+  // 注册 WebSocket 消息处理器
+  wsService.on(MessageType.CHAT_TEXT_MESSAGE, handlePrivateChatMessage)
+  wsService.on(MessageType.CHAT_MEDIA_MESSAGE, handlePrivateChatMessage)
+})
+
+// 清理
+onUnmounted(() => {
+  // 移除 WebSocket 消息处理器
+  wsService.off(MessageType.CHAT_TEXT_MESSAGE, handlePrivateChatMessage)
+  wsService.off(MessageType.CHAT_MEDIA_MESSAGE, handlePrivateChatMessage)
+})
+
+// 监听对话框关闭，清理状态
+watch(chatDialogVisible, (visible) => {
+  if (!visible) {
+    currentChatContact.value = null
+    privateChatMessages.value = []
+  }
 })
 </script>
 
@@ -685,5 +898,23 @@ onMounted(() => {
   .contact-right {
     max-height: none;
   }
+}
+
+/* 未读消息徽章 */
+.unread-badge {
+  margin-left: 8px;
+}
+
+.unread-badge :deep(.el-badge__content) {
+  background-color: var(--color-error);
+}
+
+/* 私聊对话框 */
+.chat-dialog :deep(.el-dialog__body) {
+  padding: 0;
+}
+
+.private-chat-container {
+  height: 450px;
 }
 </style>

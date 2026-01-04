@@ -17,6 +17,8 @@
           :title="item.label"
         >
           <component :is="item.icon" class="nav-icon" />
+          <!-- 通讯录未读消息红点 -->
+          <span v-if="item.key === 'contacts' && hasContactUnread" class="unread-dot"></span>
           <span class="nav-tooltip">{{ item.label }}</span>
         </div>
       </div>
@@ -44,10 +46,12 @@ import { useRouter, useRoute } from 'vue-router'
 import { VideoCamera, User, FolderOpened, Setting, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { useChatStore } from '@/stores/chat'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const chatStore = useChatStore()
 
 const navItems = [
   { key: 'meeting', label: '会议', icon: VideoCamera, path: '/' },
@@ -64,6 +68,9 @@ const activeKey = computed(() => {
   if (path.startsWith('/settings')) return 'settings'
   return 'meeting'
 })
+
+// 通讯录是否有未读消息
+const hasContactUnread = computed(() => chatStore.hasUnread)
 
 const userName = computed(() => userStore.nickName || '用户')
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
@@ -181,6 +188,18 @@ async function handleLogout() {
   visibility: hidden;
   transition: opacity var(--transition-fast), visibility var(--transition-fast);
   pointer-events: none;
+}
+
+/* 未读消息红点 */
+.unread-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background: #f56c6c;
+  border-radius: 50%;
+  border: 2px solid var(--color-bg-dark);
 }
 
 .nav-item:hover .nav-tooltip {

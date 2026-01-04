@@ -225,3 +225,58 @@ export interface MeetingInviteContent {
   meetingName: string
   inviteUserName: string
 }
+
+// 聊天消息类型
+export interface ChatMessage {
+  messageId: number
+  meetingId: string
+  sendUserId: string
+  sendUserNickName: string
+  receiveUserId: string
+  receiveType: number  // 0-群发, 1-私聊
+  messageType: number  // 5-文本, 6-媒体
+  messageContent: string
+  fileName?: string
+  fileSize?: number
+  fileType?: number
+  sendTime: number
+  status: number
+}
+
+// 私聊消息类型
+export interface PrivateChatMessage {
+  messageId: number
+  sessionId: string
+  sendUserId: string
+  sendUserNickName: string
+  receiveUserId: string
+  messageType: number
+  messageContent: string
+  fileName?: string
+  fileSize?: number
+  fileType?: number
+  sendTime: number
+  status: number
+}
+
+// 未读消息记录
+export interface PrivateChatUnread {
+  id: number
+  userId: string
+  contactId: string
+  unreadCount: number
+  lastMessageContent: string
+  lastMessageTime: number
+}
+
+// 消息类型枚举
+export enum MessageTypeEnum {
+  CHAT_TEXT_MESSAGE = 5,
+  CHAT_MEDIA_MESSAGE = 6
+}
+
+// 接收类型枚举
+export enum ReceiveTypeEnum {
+  ALL = 0,      // 群发
+  USER = 1      // 私聊
+}

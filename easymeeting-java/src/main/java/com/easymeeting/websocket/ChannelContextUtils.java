@@ -48,11 +48,15 @@ public class ChannelContextUtils {
         // 如果用户已有旧连接，先关闭（单设备登录）
         Channel oldChannel = USER_CONTEXT_MAP.get(userId);
         if (oldChannel != null && oldChannel != channel) {
-            // 先从旧会议房间移除
+            // 先获取旧连接的用户信息，用于从会议房间移除
             TokenUserInfoDto oldUserInfo = oldChannel.attr(TOKEN_USER_INFO_KEY).get();
             if (oldUserInfo != null && oldUserInfo.getCurrentMeetingId() != null) {
                 leaveMeetingRoom(oldUserInfo.getCurrentMeetingId(), oldChannel);
             }
+            // 清除旧连接的属性，防止 channelInactive 发送退出消息
+            // 因为这是同一用户的重连，不是真正的退出
+            oldChannel.attr(USER_ID_KEY).set(null);
+            oldChannel.attr(TOKEN_USER_INFO_KEY).set(null);
             oldChannel.close();
         }
 
@@ -110,17 +114,25 @@ public class ChannelContextUtils {
      */
     public void removeByChannel(Channel channel) {
         String userId = channel.attr(USER_ID_KEY).get();
-        if (userId != null) {
-            // 从会议房间移除
-            TokenUserInfoDto userInfo = channel.attr(TOKEN_USER_INFO_KEY).get();
-            if (userInfo != null && userInfo.getCurrentMeetingId() != null) {
-                leaveMeetingRoom(userInfo.getCurrentMeetingId(), channel);
-            }
-            // 只有当前 Channel 匹配时才移除，防止误删新连接
-            USER_CONTEXT_MAP.remove(userId, channel);
-            
-            log.info("用户 {} 连接已断开，ChannelId: {}", userId, channel.id().asShortText());
+        if (userId == null) {
+            // 已经被清理过，直接返回（幂等性保护）
+            return;
         }
+        
+        // 先清除 Channel 属性，防止重复处理
+        channel.attr(USER_ID_KEY).set(null);
+        
+        // 从会议房间移除
+        TokenUserInfoDto userInfo = channel.attr(TOKEN_USER_INFO_KEY).get();
+        if (userInfo != null && userInfo.getCurrentMeetingId() != null) {
+            leaveMeetingRoom(userInfo.getCurrentMeetingId(), channel);
+        }
+        channel.attr(TOKEN_USER_INFO_KEY).set(null);
+        
+        // 只有当前 Channel 匹配时才移除，防止误删新连接
+        USER_CONTEXT_MAP.remove(userId, channel);
+        
+        log.info("用户 {} 连接已断开，ChannelId: {}", userId, channel.id().asShortText());
     }
 
     /**

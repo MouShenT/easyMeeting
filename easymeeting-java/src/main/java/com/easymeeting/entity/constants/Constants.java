@@ -199,4 +199,8 @@ public class Constants {
      * 用于 @ConditionalOnProperty(name = MESSAGE_HANDLE_CHANNEL, havingValue = "redis")
      */
     public static final String MESSAGE_HANDLE_CHANNEL = "messaging.handle.channel";
+    // ==================== 消息发送类型 ====================
+    public static final String ZERO_STR = "0";
+    public static final String ONE_STR = "1";
+
 }

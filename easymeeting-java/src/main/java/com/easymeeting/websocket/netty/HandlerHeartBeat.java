@@ -36,8 +36,8 @@ public class HandlerHeartBeat extends ChannelDuplexHandler {
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         log.info("有连接已经断开");
-        // 调用 ChannelContextUtils 处理断开逻辑
-        channelContextUtils.removeByChannel(ctx.channel());
+        // 注意：不在这里调用 removeByChannel，由 HandlerWebSocket.channelInactive 统一处理
+        // 避免重复清理导致的问题
         super.channelInactive(ctx);
     }
 }

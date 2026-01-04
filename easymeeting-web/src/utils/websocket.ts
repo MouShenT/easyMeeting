@@ -229,6 +229,12 @@ class WebSocketService {
 
   // 处理收到的消息
   private handleMessage(data: string) {
+    // 心跳响应不需要解析
+    if (data === 'pong' || data === 'heart') {
+      console.log('Heartbeat response received')
+      return
+    }
+    
     try {
       const message: WebSocketMessage = JSON.parse(data)
       console.log('Received message:', message)

@@ -188,9 +188,17 @@ export class WebRTCManager {
   createConnection(remoteUserId: string): RTCPeerConnection {
     console.log('Creating PeerConnection for:', remoteUserId, 'hasLocalStream:', !!this.localStream)
     
-    // 如果已存在连接，先关闭
-    if (this.peerConnections.has(remoteUserId)) {
-      console.log('Closing existing connection with:', remoteUserId)
+    // 如果已存在连接且状态良好，直接返回现有连接
+    const existingPc = this.peerConnections.get(remoteUserId)
+    if (existingPc) {
+      const state = existingPc.connectionState
+      // 如果连接状态是 connecting, connected 或 new，复用现有连接
+      if (state === 'connecting' || state === 'connected' || state === 'new') {
+        console.log('Reusing existing connection with:', remoteUserId, 'state:', state)
+        return existingPc
+      }
+      // 否则关闭旧连接
+      console.log('Closing stale connection with:', remoteUserId, 'state:', state)
       this.closeConnection(remoteUserId)
     }
     
@@ -308,9 +316,45 @@ export class WebRTCManager {
 
   /**
    * 向指定用户发起连接（作为 Offer 方）
+   * 即使没有本地流也会发起连接（recvonly 模式），确保能接收对方的视频
    */
   async initiateConnection(remoteUserId: string): Promise<void> {
-    console.log('Initiating connection to:', remoteUserId)
+    console.log('Initiating connection to:', remoteUserId, 'hasLocalStream:', !!this.localStream)
+    
+    // 如果没有本地流，等待一下（给摄像头初始化一些时间）
+    if (!this.localStream) {
+      console.log('Waiting for local stream before initiating connection...')
+      let waitTime = 0
+      const maxWait = 3000  // 等待 3 秒
+      const checkInterval = 100
+      
+      while (!this.localStream && waitTime < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, checkInterval))
+        waitTime += checkInterval
+      }
+      
+      if (this.localStream) {
+        console.log('Local stream ready after', waitTime, 'ms')
+      } else {
+        // 【修改】即使没有本地流，也要发起连接
+        // 这样至少可以接收对方的视频（recvonly 模式）
+        console.warn('Local stream not ready after', maxWait, 'ms, proceeding with recvonly connection')
+      }
+    }
+    
+    // 检查是否已有活跃连接
+    const existingPc = this.peerConnections.get(remoteUserId)
+    if (existingPc) {
+      const state = existingPc.connectionState
+      if (state === 'connected') {
+        console.log('Already connected to:', remoteUserId, '- skipping')
+        return
+      }
+      if (state === 'connecting') {
+        console.log('Already connecting to:', remoteUserId, '- skipping')
+        return
+      }
+    }
     
     const pc = this.createConnection(remoteUserId)
     
@@ -318,7 +362,8 @@ export class WebRTCManager {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       
-      console.log('Sending offer to:', remoteUserId)
+      const hasLocalTracks = this.localStream ? this.localStream.getTracks().length > 0 : false
+      console.log('Sending offer to:', remoteUserId, 'hasLocalTracks:', hasLocalTracks)
       wsService.send({
         messageSendToType: MessageSendToType.USER,
         meetingId: this.meetingId,
@@ -337,7 +382,73 @@ export class WebRTCManager {
    */
   private async handleOffer(message: WebSocketMessage): Promise<void> {
     const remoteUserId = message.sendUserId!
-    console.log('Received offer from:', remoteUserId)
+    const offerSdp = message.messageContent?.sdp || ''
+    const isRecvOnlyOffer = offerSdp.includes('a=recvonly')
+    
+    console.log('Received offer from:', remoteUserId, 'hasLocalStream:', !!this.localStream, 'isRecvOnlyOffer:', isRecvOnlyOffer)
+    
+    // 如果本地流还没准备好，等待一段时间
+    // 这解决了新成员加入时，现有成员的 Offer 到达太快的问题
+    if (!this.localStream) {
+      console.log('Local stream not ready, waiting...')
+      let waitTime = 0
+      const maxWait = 5000 // 最多等待 5 秒（增加等待时间）
+      const checkInterval = 100
+      
+      while (!this.localStream && waitTime < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, checkInterval))
+        waitTime += checkInterval
+      }
+      
+      // 重新检查 localStream（TypeScript 需要这样才能正确推断类型）
+      const stream = this.localStream as MediaStream | null
+      if (stream) {
+        console.log('Local stream ready after', waitTime, 'ms, tracks:', stream.getTracks().length)
+      } else {
+        console.warn('Local stream still not ready after', maxWait, 'ms, proceeding without it')
+      }
+    }
+    
+    // 检查是否已有连接
+    const existingPc = this.peerConnections.get(remoteUserId)
+    if (existingPc) {
+      const state = existingPc.connectionState
+      // 如果已经连接，检查是否需要处理重新协商
+      if (state === 'connected') {
+        // 如果是重新协商的 Offer（对方添加了新轨道），需要处理
+        console.log('Received offer on existing connected connection, handling renegotiation')
+        try {
+          await existingPc.setRemoteDescription(new RTCSessionDescription(message.messageContent))
+          const answer = await existingPc.createAnswer()
+          await existingPc.setLocalDescription(answer)
+          
+          console.log('Sending renegotiation answer to:', remoteUserId)
+          wsService.send({
+            messageSendToType: MessageSendToType.USER,
+            meetingId: this.meetingId,
+            messageType: MessageType.WEBRTC_ANSWER,
+            sendUserId: this.userId,
+            receiveUserId: remoteUserId,
+            messageContent: answer
+          })
+        } catch (error) {
+          console.error('Failed to handle renegotiation offer:', error)
+        }
+        return
+      }
+      // 如果正在连接中，可能是双方同时发起，使用 userId 比较决定谁让步
+      if (state === 'connecting' || state === 'new') {
+        // 如果我的 userId 更大，我让步，接受对方的 Offer
+        // 如果我的 userId 更小，忽略对方的 Offer，继续我的连接
+        if (this.userId < remoteUserId) {
+          console.log('Glare detected, my userId is smaller, ignoring offer from:', remoteUserId)
+          return
+        }
+        console.log('Glare detected, my userId is larger, accepting offer from:', remoteUserId)
+        // 关闭现有连接，接受对方的 Offer
+        this.closeConnection(remoteUserId)
+      }
+    }
     
     const pc = this.createConnection(remoteUserId)
     
@@ -356,8 +467,78 @@ export class WebRTCManager {
         receiveUserId: remoteUserId,
         messageContent: answer
       })
+      
+      // 【关键修复】如果收到的是 recvonly Offer，说明对方没有视频流
+      // 我们需要主动发起一个新的连接，让对方能收到我们的视频
+      // 同时我们也能请求对方发送视频（如果对方后来有了视频流）
+      if (isRecvOnlyOffer && this.localStream) {
+        console.log('Received recvonly offer, will initiate reverse connection to send our video')
+        // 延迟一点，确保当前协商完成
+        setTimeout(() => {
+          this.renegotiateConnection(remoteUserId)
+        }, 1500)
+      }
+      // 如果本地流在创建连接时还没准备好，但现在准备好了
+      // 需要发起重新协商，让对方能收到我们的视频流
+      else if (this.localStream && pc.getSenders().filter(s => s.track !== null).length === 0) {
+        console.log('Local stream ready but no senders, triggering renegotiation with:', remoteUserId)
+        // 延迟一点再发起重新协商，确保当前协商完成
+        setTimeout(() => {
+          this.renegotiateConnection(remoteUserId)
+        }, 1000)
+      }
     } catch (error) {
       console.error('Failed to handle offer:', error)
+    }
+  }
+  
+  /**
+   * 重新协商连接（当本地流后来准备好时使用）
+   * 向对方发送新的 Offer，包含我们的媒体轨道
+   */
+  private async renegotiateConnection(remoteUserId: string): Promise<void> {
+    const pc = this.peerConnections.get(remoteUserId)
+    if (!pc || !this.localStream) {
+      return
+    }
+    
+    // 检查连接状态
+    if (pc.connectionState !== 'connected' && pc.connectionState !== 'connecting') {
+      console.log('Connection not ready for renegotiation:', pc.connectionState)
+      return
+    }
+    
+    // 检查是否已经有发送器
+    const existingSenders = pc.getSenders().filter(s => s.track !== null)
+    if (existingSenders.length > 0) {
+      console.log('Already have senders, no need to renegotiate')
+      return
+    }
+    
+    console.log('Renegotiating connection with:', remoteUserId, 'to add local tracks')
+    
+    try {
+      // 添加本地轨道
+      this.localStream.getTracks().forEach(track => {
+        pc.addTrack(track, this.localStream!)
+        console.log('Added track for renegotiation:', track.kind)
+      })
+      
+      // 创建新的 Offer
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      
+      console.log('Sending renegotiation offer to:', remoteUserId)
+      wsService.send({
+        messageSendToType: MessageSendToType.USER,
+        meetingId: this.meetingId,
+        messageType: MessageType.WEBRTC_OFFER,
+        sendUserId: this.userId,
+        receiveUserId: remoteUserId,
+        messageContent: offer
+      })
+    } catch (error) {
+      console.error('Failed to renegotiate connection:', error)
     }
   }
 
