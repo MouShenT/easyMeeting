@@ -34,26 +34,25 @@
 ```
 easymeeting/
 ├── easymeeting-java/          # 后端 Spring Boot 项目
-│   ├── src/main/java/
-│   │   └── com/easymeeting/
-│   │       ├── controller/    # REST API 控制器
-│   │       ├── service/       # 业务逻辑层
-│   │       ├── mapper/        # MyBatis 数据访问层
-│   │       ├── entity/        # 实体类
-│   │       ├── websocket/     # WebSocket/Netty 相关
-│   │       └── redis/         # Redis 配置
-│   └── Dockerfile
+│   └── src/main/java/com/easymeeting/
+│       ├── controller/        # REST API 控制器
+│       ├── service/           # 业务逻辑层
+│       ├── mapper/            # MyBatis 数据访问层
+│       ├── entity/            # 实体类
+│       ├── websocket/         # WebSocket/Netty 相关
+│       └── redis/             # Redis 配置
 ├── easymeeting-web/           # 前端 Vue 项目
-│   ├── src/
-│   │   ├── views/             # 页面组件
-│   │   ├── components/        # 公共组件
-│   │   ├── api/               # API 接口
-│   │   ├── utils/             # 工具函数
-│   │   └── router/            # 路由配置
-│   ├── Dockerfile
-│   └── nginx.conf
-├── init-sql/                  # 数据库初始化脚本
-├── docker-compose.yml         # Docker 编排文件
+│   └── src/
+│       ├── views/             # 页面组件
+│       ├── components/        # 公共组件
+│       ├── api/               # API 接口
+│       └── utils/             # 工具函数
+├── easymeeting-deploy/        # Docker 部署目录（预编译）
+│   ├── backend/app.jar        # 预编译后端 JAR
+│   ├── frontend/dist/         # 预编译前端静态文件
+│   ├── init-sql/              # 数据库初始化脚本
+│   └── docker-compose.yml     # Docker 编排文件
+├── init-sql/                  # 数据库初始化脚本（源）
 └── docs/                      # 项目文档
 ```
 
@@ -61,21 +60,56 @@ easymeeting/
 
 ### 方式一：Docker 部署（推荐）
 
+**服务器部署（使用预编译包）：**
+
 ```bash
 # 1. 克隆项目
 git clone https://github.com/MouShenT/easyMeeting.git
-cd easyMeeting
+cd easyMeeting/easymeeting-deploy
 
 # 2. 配置环境变量
 cp .env.example .env
-# 编辑 .env 修改数据库和 Redis 密码
+vi .env  # 修改 MYSQL_ROOT_PASSWORD 和 REDIS_PASSWORD
 
 # 3. 启动服务
 docker compose up -d --build
 
 # 4. 访问应用
-# 前端: http://localhost
-# 后端 API: http://localhost/api
+# 前端: http://服务器IP
+# 后端 API: http://服务器IP/api
+```
+
+**本地打包并更新部署包：**
+
+```bash
+# 1. 后端打包
+cd easymeeting-java
+mvn clean package -DskipTests
+
+# 2. 前端打包
+cd ../easymeeting-web
+npm install
+npm run build
+
+# 3. 复制到部署目录
+cd ..
+copy easymeeting-java\target\easymeeting-1.0.jar easymeeting-deploy\backend\app.jar
+xcopy /E /I /Y easymeeting-web\dist easymeeting-deploy\frontend\dist
+copy init-sql\easymeeting.sql easymeeting-deploy\init-sql\
+
+# 4. 提交并推送
+git add .
+git commit -m "chore: 更新部署包"
+git push origin main
+```
+
+**服务器更新：**
+
+```bash
+cd /opt/easyMeeting
+git pull origin main
+cd easymeeting-deploy
+docker compose up -d --build
 ```
 
 详细部署指南请参考 [Docker 部署文档](docs/docker-deployment-guide.md)

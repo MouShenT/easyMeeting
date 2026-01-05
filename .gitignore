@@ -1,0 +1,52 @@
+# ===========================================
+# 排除不需要 Git 管理的文件夹
+# ===========================================
+.idea/
+.vscode/
+.kiro/
+
+# docs 目录 - 只保留 docker 部署文档
+docs/*
+!docs/docker-deployment-guide.md
+
+# ===========================================
+# Java 项目 (easymeeting-java)
+# ===========================================
+easymeeting-java/target/
+easymeeting-java/*.iml
+easymeeting-java/.mvn/
+easymeeting-java/mvnw
+easymeeting-java/mvnw.cmd
+
+# ===========================================
+# Web 项目 (easymeeting-web)
+# ===========================================
+easymeeting-web/node_modules/
+easymeeting-web/dist/
+easymeeting-web/*.local
+easymeeting-web/.shared
+
+
+# ===========================================
+# 通用排除
+# ===========================================
+# 日志文件
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 环境配置文件（包含敏感信息）
+*.env
+*.env.local
+*.env.*.local
+
+# ===========================================
+# 部署目录 (easymeeting-deploy) - 允许提交预编译文件
+# ===========================================
+# 允许 backend/app.jar
+!easymeeting-deploy/backend/app.jar
+
+# 允许 frontend/dist 目录
+!easymeeting-deploy/frontend/dist/
