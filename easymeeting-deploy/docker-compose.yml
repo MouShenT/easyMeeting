@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-  # ==================== MySQL 数据库 ====================
   mysql:
     image: mysql:8.0
     container_name: easymeeting-mysql
@@ -14,7 +11,7 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./init-sql:/docker-entrypoint-initdb.d  # 初始化 SQL 脚本
+      - ./init-sql:/docker-entrypoint-initdb.d
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     networks:
       - easymeeting-network
@@ -24,7 +21,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ==================== Redis 缓存 ====================
   redis:
     image: redis:7-alpine
     container_name: easymeeting-redis
@@ -42,28 +38,24 @@ services:
       timeout: 5s
       retries: 5
 
-  # ==================== 后端服务 ====================
   backend:
     build:
-      context: ./easymeeting-java
+      context: ./backend
       dockerfile: Dockerfile
     container_name: easymeeting-backend
     restart: always
     environment:
-      # 数据库配置
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/easymeeting?serverTimezone=GMT%2B8&useUnicode=true&characterEncoding=utf8&autoReconnect=true&allowMultiQueries=true&useSSL=false
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-12345678}
-      # Redis 配置
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
-      # 项目配置
       PROJECT_FOLDER: /app/files/
       TZ: Asia/Shanghai
     ports:
-      - "6060:6060"   # HTTP API
-      - "6061:6061"   # WebSocket
+      - "6060:6060"
+      - "6061:6061"
     volumes:
       - backend_files:/app/files
       - backend_logs:/app/logs
@@ -75,10 +67,9 @@ services:
     networks:
       - easymeeting-network
 
-  # ==================== 前端服务 ====================
   frontend:
     build:
-      context: ./easymeeting-web
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: easymeeting-frontend
     restart: always
@@ -89,12 +80,10 @@ services:
     networks:
       - easymeeting-network
 
-# ==================== 网络配置 ====================
 networks:
   easymeeting-network:
     driver: bridge
 
-# ==================== 数据卷 ====================
 volumes:
   mysql_data:
   redis_data:
