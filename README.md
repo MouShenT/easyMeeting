@@ -77,39 +77,7 @@ docker compose up -d --build
 # 4. 访问应用
 # 前端: http://服务器IP
 # 后端 API: http://服务器IP/api
-```
 
-**本地打包并更新部署包：**
-
-```bash
-# 1. 后端打包
-cd easymeeting-java
-mvn clean package -DskipTests
-
-# 2. 前端打包
-cd ../easymeeting-web
-npm install
-npm run build
-
-# 3. 复制到部署目录
-cd ..
-copy easymeeting-java\target\easymeeting-1.0.jar easymeeting-deploy\backend\app.jar
-xcopy /E /I /Y easymeeting-web\dist easymeeting-deploy\frontend\dist
-copy init-sql\easymeeting.sql easymeeting-deploy\init-sql\
-
-# 4. 提交并推送
-git add .
-git commit -m "chore: 更新部署包"
-git push origin main
-```
-
-**服务器更新：**
-
-```bash
-cd /opt/easyMeeting
-git pull origin main
-cd easymeeting-deploy
-docker compose up -d --build
 ```
 
 详细部署指南请参考 [Docker 部署文档](docs/docker-deployment-guide.md)
